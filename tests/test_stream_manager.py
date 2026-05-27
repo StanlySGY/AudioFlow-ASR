@@ -22,12 +22,16 @@ def settings(tmp_path: Path) -> Settings:
     )
 
 
+def _stub_settings() -> Settings:
+    return Settings(asr_api_key="x")
+
+
 def _evt(i: int) -> SegmentEvent:
     return SegmentEvent(task_id="t", segment_id=i, start=0, end=1, text=f"seg{i}", is_final=True)
 
 
 async def test_subscriber_replays_history_and_then_lives():
-    task = _Task("t")
+    task = _Task("t", _stub_settings())
     task.publish(_evt(1))
     task.publish(_evt(2))
 
@@ -49,7 +53,7 @@ async def test_subscriber_replays_history_and_then_lives():
 
 
 async def test_multiple_subscribers_each_get_all_events():
-    task = _Task("t")
+    task = _Task("t", _stub_settings())
     task.publish(_evt(1))
 
     out_a: list[int] = []
@@ -72,7 +76,7 @@ async def test_multiple_subscribers_each_get_all_events():
 
 
 async def test_late_subscriber_on_completed_task_exits_immediately():
-    task = _Task("t")
+    task = _Task("t", _stub_settings())
     task.publish(_evt(1))
     task.publish(_evt(2))
     task.complete()
@@ -103,10 +107,10 @@ async def test_eviction_keeps_inflight_tasks(settings: Settings):
     mgr = TaskManager(settings)
     # 3 completed + 1 in-flight; max_tasks_in_memory=3 → 1 completed should be evicted.
     for i in range(3):
-        t = _Task(f"done{i}")
+        t = _Task(f"done{i}", _stub_settings())
         t.complete()
         mgr._tasks[t.info.task_id] = t
-    inflight = _Task("running")
+    inflight = _Task("running", _stub_settings())
     mgr._tasks["running"] = inflight
 
     mgr._evict_if_needed()

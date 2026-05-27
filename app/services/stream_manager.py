@@ -24,15 +24,16 @@ _TERMINAL = {TaskStatus.done, TaskStatus.failed}
 class _Task:
     """Per-task state: events history + subscriber fan-out + termination signal."""
 
-    __slots__ = ("info", "result", "events", "subscribers", "done", "completed_at")
+    __slots__ = ("info", "result", "events", "subscribers", "done", "completed_at", "settings")
 
-    def __init__(self, task_id: str) -> None:
+    def __init__(self, task_id: str, settings: Settings) -> None:
         self.info = TaskInfo(task_id=task_id, status=TaskStatus.pending)
         self.result = TaskResult(task_id=task_id, status=TaskStatus.pending)
         self.events: list[SegmentEvent] = []
         self.subscribers: set[asyncio.Queue[SegmentEvent | None]] = set()
         self.done: asyncio.Event = asyncio.Event()
         self.completed_at: float | None = None
+        self.settings: Settings = settings
 
     def publish(self, evt: SegmentEvent) -> None:
         """Append to history and fan out to all live subscribers. Sync only — atomic w.r.t. subscribe()."""
@@ -76,10 +77,11 @@ class TaskManager:
 
     # ---- lifecycle ----
 
-    async def submit(self, source_path: Path, original_name: str) -> str:
+    async def submit(self, source_path: Path, original_name: str, *, overrides: dict | None = None) -> str:
         self._evict_if_needed()
         task_id = uuid.uuid4().hex
-        task = _Task(task_id)
+        task_settings = self._settings.model_copy(update=overrides) if overrides else self._settings
+        task = _Task(task_id, task_settings)
         async with self._lock:
             self._tasks[task_id] = task
 
@@ -137,7 +139,7 @@ class TaskManager:
             log.warning("failed to rehydrate task %s", task_id, exc_info=True)
             return None
 
-        task = _Task(task_id)
+        task = _Task(task_id, self._settings)
         task.result = result
         task.info = TaskInfo(
             task_id=task_id,
@@ -155,8 +157,8 @@ class TaskManager:
     # ---- pipeline ----
 
     async def _run(self, task_id: str, source_path: Path, original_name: str) -> None:
-        s = self._settings
         task = self._tasks[task_id]
+        s = task.settings
         work_dir = s.temp_dir / task_id
         work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -216,13 +218,14 @@ class TaskManager:
                 log.warning("cleanup failed for %s", task_id, exc_info=True)
 
     async def _transcribe_all(self, task: _Task, segments: list[Segment]) -> None:
-        s = self._settings
+        s = task.settings
         sem = asyncio.Semaphore(max(1, s.asr_concurrency))
 
         async with create_provider(s) as provider:
 
             async def worker(seg: Segment) -> None:
                 async with sem:
+                    t0 = time.perf_counter()
                     try:
                         res = await provider.transcribe(seg.file_path)
                         seg.text = res.text
@@ -230,12 +233,14 @@ class TaskManager:
                             Word(word=w.word, start=w.start + seg.start, end=w.end + seg.start)
                             for w in res.words
                         ]
+                        seg.raw = res.raw
                         seg.is_final = True
                     except ASRError as e:
                         seg.error = str(e)
                         seg.is_final = True
                         log.warning("segment %d failed: %s", seg.segment_id, e)
                     finally:
+                        seg.elapsed_ms = (time.perf_counter() - t0) * 1000.0
                         task.info.finished_segments += 1
                         if task.info.total_segments:
                             task.info.progress = task.info.finished_segments / task.info.total_segments
@@ -246,6 +251,7 @@ class TaskManager:
                             end=seg.end,
                             text=seg.text,
                             is_final=seg.is_final,
+                            elapsed_ms=seg.elapsed_ms,
                             error=seg.error,
                         ))
 

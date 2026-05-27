@@ -31,6 +31,8 @@ class Segment(BaseModel):
     is_final: bool = False
     error: str | None = None
     words: list[Word] = Field(default_factory=list)
+    elapsed_ms: float = 0.0
+    raw: dict | None = None
 
     @property
     def duration(self) -> float:
@@ -45,6 +47,7 @@ class SegmentEvent(BaseModel):
     end: float
     text: str
     is_final: bool
+    elapsed_ms: float = 0.0
     error: str | None = None
 
 

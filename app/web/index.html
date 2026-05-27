@@ -90,6 +90,45 @@
   footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 36px; }
   footer a { color: var(--muted); }
   .hidden { display: none !important; }
+
+  /* Settings panel */
+  details.settings { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; }
+  details.settings > summary { padding: 14px 18px; cursor: pointer; user-select: none; list-style: none; display: flex; align-items: center; gap: 10px; }
+  details.settings > summary::-webkit-details-marker { display: none; }
+  details.settings > summary::before { content: "▸"; transition: transform .15s; color: var(--muted); }
+  details.settings[open] > summary::before { transform: rotate(90deg); }
+  details.settings > summary b { font-weight: 500; }
+  details.settings > summary .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .settings-body { padding: 0 18px 16px; }
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 18px; font-size: 13px; }
+  .settings-grid .kv { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #232936; }
+  .settings-grid .kv span:first-child { color: var(--muted); }
+  .settings-grid .kv span:last-child { font-family: var(--mono); color: var(--fg); text-align: right; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+  .settings-grid .kv.warn span:last-child { color: var(--warn); }
+  .ping-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .ping-status { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .ping-status.ok { color: var(--ok); }
+  .ping-status.err { color: var(--err); }
+
+  /* Override form */
+  .overrides { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 14px; margin-top: 12px; }
+  .overrides label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .overrides input[type=text], .overrides input[type=number], .overrides select {
+    background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 13px;
+    font-family: -apple-system, sans-serif;
+  }
+  .overrides input[type=text]::placeholder, .overrides input[type=number]::placeholder { color: #4a5466; }
+  .overrides .check { flex-direction: row; align-items: center; gap: 8px; color: var(--fg); cursor: pointer; }
+  .overrides .check input { width: 14px; height: 14px; }
+
+  /* Segment row expand */
+  tr.seg-row { cursor: pointer; }
+  tr.seg-row:hover { background: #1a1f29; }
+  tr.detail-row > td { padding: 0; border-bottom: 1px solid var(--border); }
+  .seg-detail { padding: 12px 14px; background: #131720; }
+  .seg-detail pre { margin: 0; max-height: 260px; overflow: auto; font-family: var(--mono); font-size: 11px; color: #b9c2d1; white-space: pre-wrap; word-break: break-all; }
+  td.elapsed { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -100,12 +139,43 @@
     <span class="sub">长音频切分 · 流式转写</span>
   </header>
 
+  <details class="settings" id="settingsPanel">
+    <summary><b>服务配置</b><span class="sub" id="settingsSummary">点击查看 / 测试连接</span></summary>
+    <div class="settings-body">
+      <div class="settings-grid" id="configGrid"><span class="kv"><span>加载中…</span><span>—</span></span></div>
+      <div class="ping-row">
+        <button id="pingBtn">测试连接</button>
+        <span class="ping-status" id="pingStatus">未测试</span>
+      </div>
+    </div>
+  </details>
+
   <section class="card" id="uploadCard">
     <div id="drop" class="drop">
       <strong>点击选择 或 拖拽音频/视频文件到此处</strong>
       <small>支持 mp3 / wav / m4a / flac / aac / ogg / mp4 / mov / mkv · 最长 2h+</small>
       <input type="file" id="file" hidden accept="audio/*,video/*,.pcm">
     </div>
+    <details style="margin-top: 14px;">
+      <summary style="cursor: pointer; color: var(--muted); font-size: 13px; user-select: none;">▸ 仅本次任务覆盖（留空 = 用服务端默认）</summary>
+      <div class="overrides">
+        <label>Model<input type="text" id="ovModel" placeholder="qwen3-asr-flash"></label>
+        <label>Language<input type="text" id="ovLanguage" placeholder="zh / en / auto"></label>
+        <label>Split strategy
+          <select id="ovSplit">
+            <option value="">(默认)</option>
+            <option value="fixed">fixed</option>
+            <option value="silence">silence</option>
+            <option value="overlap">overlap</option>
+          </select>
+        </label>
+        <label>Chunk seconds<input type="number" id="ovChunk" placeholder="30" min="5" step="5"></label>
+        <label>Overlap seconds<input type="number" id="ovOverlap" placeholder="2" min="0" step="0.5"></label>
+        <label>Hotwords<input type="text" id="ovHotwords" placeholder="逗号分隔"></label>
+        <label>Prompt hints<input type="text" id="ovHints" placeholder="自由文本"></label>
+        <label class="check"><input type="checkbox" id="ovTimestamps">请求 word 时间戳</label>
+      </div>
+    </details>
   </section>
 
   <section class="card hidden" id="taskCard">
@@ -125,7 +195,7 @@
 
     <div class="pane active" id="pane-live">
       <table id="segTable">
-        <thead><tr><th style="width:60px">ID</th><th style="width:130px">时间</th><th>识别文本</th></tr></thead>
+        <thead><tr><th style="width:60px">ID</th><th style="width:130px">时间</th><th style="width:80px">耗时</th><th>识别文本</th></tr></thead>
         <tbody></tbody>
       </table>
       <div class="empty" id="emptyHint">等待分片切分完成 …</div>
@@ -187,7 +257,64 @@ function sseUrl(path) {
       if (tok) setToken(tok);
     }
   } catch (e) { /* ignore */ }
+  await loadConfig();
 })();
+
+const CONFIG_FIELDS = [
+  ['provider', 'ASR Provider'],
+  ['model', 'Model'],
+  ['base_url', 'Base URL'],
+  ['language', 'Language'],
+  ['timestamps', 'Word timestamps'],
+  ['hotwords', 'Hotwords'],
+  ['prompt_hints', 'Prompt hints'],
+  ['split_strategy', 'Split strategy'],
+  ['chunk_seconds', 'Chunk (s)'],
+  ['overlap_seconds', 'Overlap (s)'],
+  ['concurrency', 'Concurrency'],
+  ['max_retries', 'Max retries'],
+  ['api_key_set', 'API key set'],
+];
+
+async function loadConfig() {
+  try {
+    const cfg = await authedFetch('/asr/config').then(r => r.json());
+    const grid = $('#configGrid');
+    grid.innerHTML = '';
+    for (const [k, label] of CONFIG_FIELDS) {
+      let val = cfg[k];
+      if (Array.isArray(val)) val = val.length ? val.join(', ') : '(空)';
+      if (val === null || val === undefined || val === '') val = '(空)';
+      if (typeof val === 'boolean') val = val ? '是' : '否';
+      const warn = (k === 'api_key_set' && cfg[k] === false) ? ' warn' : '';
+      grid.insertAdjacentHTML('beforeend', `<span class="kv${warn}"><span>${label}</span><span title="${esc(String(val))}">${esc(String(val))}</span></span>`);
+    }
+    $('#settingsSummary').textContent = `${cfg.provider} · ${cfg.model} · ${cfg.base_url}`;
+  } catch (e) { /* ignore */ }
+}
+
+$('#pingBtn').addEventListener('click', async () => {
+  const status = $('#pingStatus');
+  status.className = 'ping-status';
+  status.textContent = '测试中 …';
+  $('#pingBtn').disabled = true;
+  try {
+    const r = await authedFetch('/asr/ping', { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) {
+      status.className = 'ping-status ok';
+      status.textContent = `✓ ${data.elapsed_ms.toFixed(0)}ms · ${data.model}${data.got_words ? ' · words ✓' : ' · 无时间戳'}`;
+    } else {
+      status.className = 'ping-status err';
+      status.textContent = `✗ ${data.elapsed_ms.toFixed(0)}ms · ${data.error || 'unknown error'}`;
+    }
+  } catch (e) {
+    status.className = 'ping-status err';
+    status.textContent = `✗ ${e.message}`;
+  } finally {
+    $('#pingBtn').disabled = false;
+  }
+});
 
 const drop = $('#drop'), fileInput = $('#file');
 drop.addEventListener('click', () => fileInput.click());
@@ -239,6 +366,9 @@ async function submit(file) {
   $('#taskCard').classList.remove('hidden');
   $('#status').textContent = 'uploading';
   const fd = new FormData(); fd.append('file', file);
+  // attach per-task overrides
+  const ov = collectOverrides();
+  for (const [k, v] of Object.entries(ov)) fd.append(k, v);
   try {
     const r = await authedFetch('/asr/task', { method: 'POST', body: fd });
     if (!r.ok) throw new Error(await r.text());
@@ -252,6 +382,28 @@ async function submit(file) {
     alert('上传失败: ' + e.message);
   }
 }
+
+function collectOverrides() {
+  const o = {};
+  const add = (key, sel, parse) => {
+    const v = $(sel).value.trim();
+    if (v !== '') o[key] = parse ? parse(v) : v;
+  };
+  add('model', '#ovModel');
+  add('language', '#ovLanguage');
+  add('split_strategy', '#ovSplit');
+  add('chunk_seconds', '#ovChunk');
+  add('overlap_seconds', '#ovOverlap');
+  add('hotwords', '#ovHotwords');
+  add('prompt_hints', '#ovHints');
+  const tsBox = $('#ovTimestamps');
+  if (tsBox.indeterminate === false && tsBox.dataset.touched === 'yes') {
+    o.timestamps = tsBox.checked ? 'true' : 'false';
+  }
+  return o;
+}
+// mark timestamps checkbox as touched so we send override only when user toggles it
+$('#ovTimestamps').addEventListener('change', (e) => { e.target.dataset.touched = 'yes'; });
 
 function start() {
   poll();
@@ -293,12 +445,41 @@ function renderSegs() {
   const tbody = $('#segTable tbody');
   const rows = [...segs.values()].sort((a, b) => a.segment_id - b.segment_id);
   if (rows.length) $('#emptyHint').classList.add('hidden');
-  tbody.innerHTML = rows.map(s => `
-    <tr>
+  tbody.innerHTML = rows.map(s => {
+    const elapsed = s.elapsed_ms ? `${s.elapsed_ms.toFixed(0)}ms` : '—';
+    return `
+    <tr class="seg-row" data-seg="${s.segment_id}">
       <td class="id">#${s.segment_id}</td>
       <td class="range">${fmtTime(s.start)} – ${fmtTime(s.end)}</td>
+      <td class="elapsed">${elapsed}</td>
       <td class="text ${s.error ? 'err' : ''}">${esc(s.error ? '⚠ ' + s.error : (s.text || '…'))}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+  tbody.querySelectorAll('tr.seg-row').forEach(tr => tr.addEventListener('click', () => toggleSegDetail(tr)));
+}
+
+async function toggleSegDetail(tr) {
+  const segId = tr.dataset.seg;
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains('detail-row') && next.dataset.for === segId) {
+    next.remove();
+    return;
+  }
+  // remove other open detail rows
+  document.querySelectorAll('tr.detail-row').forEach(r => r.remove());
+
+  const row = document.createElement('tr');
+  row.className = 'detail-row';
+  row.dataset.for = segId;
+  row.innerHTML = `<td colspan="4"><div class="seg-detail"><pre>加载中…</pre></div></td>`;
+  tr.after(row);
+
+  try {
+    const data = await authedFetch(`/asr/task/${taskId}/segments/${segId}/raw`).then(r => r.json());
+    row.querySelector('pre').textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    row.querySelector('pre').textContent = '加载失败: ' + e.message;
+  }
 }
 
 function setStatusClass(status) {
