@@ -10,6 +10,7 @@
 - 最长公共子串去重，自动拼接为完整文本
 - 失败分片隔离，自动指数退避重试
 - Docker 一键部署（内置 ffmpeg）
+- 内置 Web UI（拖拽上传 + 实时分片进度 + 完整文本复制/下载）
 
 ## 快速开始
 
@@ -22,7 +23,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-需要本机已安装 `ffmpeg` 与 `ffprobe`。
+需要本机已安装 `ffmpeg` 与 `ffprobe`。访问 `http://localhost:8000/` 打开 Web UI，`/docs` 查看 API。
 
 ### Docker
 
@@ -33,8 +34,11 @@ docker compose up -d --build
 
 ## API
 
+> 提交任务后，直接打开根路径 `/` 用 Web UI 查看实时进度也可。下面是程序化调用示例。
+
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET  | `/` | Web UI |
 | POST | `/asr/task` | `multipart/form-data` 上传音频，返回 `task_id` |
 | GET  | `/asr/task/{task_id}` | 任务状态与进度 |
 | GET  | `/asr/task/{task_id}/stream` | SSE 流式推送每个分片的识别事件 |

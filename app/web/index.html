@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AudioFlow-ASR · 长音频转写</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --panel-2:#1f232c; --border:#272c37;
+    --fg:#e7ebf0; --muted:#8b95a7; --accent:#5b9dff; --accent-2:#3b7bd9;
+    --ok:#3fbf7f; --err:#ef5a5a; --warn:#e2b13a;
+    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 24px 80px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+
+  /* Upload */
+  .drop {
+    border: 1.5px dashed #344056; border-radius: 10px;
+    padding: 36px; text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s;
+    color: var(--muted);
+  }
+  .drop:hover, .drop.drag { border-color: var(--accent); background: #1a2030; color: var(--fg); }
+  .drop strong { color: var(--fg); }
+  .drop small { display: block; margin-top: 6px; font-size: 12px; }
+
+  /* Status */
+  .row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  .row > * { flex: 0 0 auto; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .pill b { color: var(--fg); font-weight: 500; }
+  .pill.s-done { color: var(--ok); border-color: #224434; }
+  .pill.s-failed { color: var(--err); border-color: #4a2727; }
+  .pill.s-transcribing, .pill.s-splitting, .pill.s-preprocessing, .pill.s-merging { color: var(--warn); border-color: #4a3d1a; }
+
+  .bar { height: 6px; flex: 1 1 240px; background: #232936; border-radius: 999px; overflow: hidden; min-width: 200px; }
+  .bar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); width: 0%; transition: width .3s; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 4px 0 12px; }
+  .tab { padding: 8px 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--fg); border-color: var(--accent); }
+  .pane { display: none; }
+  .pane.active { display: block; }
+
+  /* Segments table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; letter-spacing: .3px; text-transform: uppercase; }
+  td.id, td.range { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+  td.text { color: var(--fg); }
+  td.text.err { color: var(--err); }
+  tbody tr { animation: fadeIn .25s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+  .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* Final transcript */
+  textarea#fullText {
+    width: 100%; min-height: 280px; padding: 14px;
+    background: var(--panel-2); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 8px; resize: vertical;
+    font: 14px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  button {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--fg);
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0c1019; font-weight: 500; }
+  button.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 36px; }
+  footer a { color: var(--muted); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="dot"></span>
+    <h1>AudioFlow-ASR</h1>
+    <span class="sub">长音频切分 · 流式转写</span>
+  </header>
+
+  <section class="card" id="uploadCard">
+    <div id="drop" class="drop">
+      <strong>点击选择 或 拖拽音频/视频文件到此处</strong>
+      <small>支持 mp3 / wav / m4a / flac / aac / ogg / mp4 / mov / mkv · 最长 2h+</small>
+      <input type="file" id="file" hidden accept="audio/*,video/*,.pcm">
+    </div>
+  </section>
+
+  <section class="card hidden" id="taskCard">
+    <div class="row" style="margin-bottom: 14px;">
+      <span class="pill">任务 <b id="taskId">—</b></span>
+      <span class="pill" id="statusPill">状态 <b id="status">—</b></span>
+      <span class="pill">分片 <b><span id="finSeg">0</span>/<span id="totalSeg">—</span></b></span>
+      <span class="pill">时长 <b id="duration">—</b></span>
+      <div class="bar"><div id="progress"></div></div>
+      <button id="newBtn">新任务</button>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-pane="live">实时分片</div>
+      <div class="tab" data-pane="final">完整文本</div>
+    </div>
+
+    <div class="pane active" id="pane-live">
+      <table id="segTable">
+        <thead><tr><th style="width:60px">ID</th><th style="width:130px">时间</th><th>识别文本</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="emptyHint">等待分片切分完成 …</div>
+    </div>
+
+    <div class="pane" id="pane-final">
+      <textarea id="fullText" placeholder="任务完成后这里将显示拼接后的完整转写文本 …" readonly></textarea>
+      <div class="actions">
+        <button id="copyBtn">复制</button>
+        <button id="downloadBtn">下载 .txt</button>
+        <button id="jsonBtn">下载 .json</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <a href="/docs" target="_blank">API 文档</a> · <a href="https://github.com/StanlySGY/AudioFlow-ASR" target="_blank">GitHub</a>
+  </footer>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const segs = new Map();
+let taskId = null;
+let es = null;
+let pollTimer = null;
+
+const drop = $('#drop'), fileInput = $('#file');
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault(); drop.classList.remove('drag');
+  if (e.dataTransfer.files[0]) submit(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => fileInput.files[0] && submit(fileInput.files[0]));
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + t.dataset.pane));
+}));
+
+$('#newBtn').addEventListener('click', reset);
+$('#copyBtn').addEventListener('click', () => navigator.clipboard.writeText($('#fullText').value));
+$('#downloadBtn').addEventListener('click', () => downloadFile(`${taskId}.txt`, $('#fullText').value, 'text/plain'));
+$('#jsonBtn').addEventListener('click', async () => {
+  if (!taskId) return;
+  const r = await fetch(`/asr/task/${taskId}/result`); const txt = await r.text();
+  downloadFile(`${taskId}.json`, txt, 'application/json');
+});
+
+function downloadFile(name, content, type) {
+  const blob = new Blob([content], { type });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+async function submit(file) {
+  reset();
+  $('#taskCard').classList.remove('hidden');
+  $('#status').textContent = 'uploading';
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await fetch('/asr/task', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    taskId = data.task_id;
+    $('#taskId').textContent = taskId;
+    start();
+  } catch (e) {
+    $('#status').textContent = 'upload failed';
+    setStatusClass('failed');
+    alert('上传失败: ' + e.message);
+  }
+}
+
+function start() {
+  poll();
+  es = new EventSource(`/asr/task/${taskId}/stream`);
+  es.addEventListener('segment', (e) => {
+    const seg = JSON.parse(e.data);
+    segs.set(seg.segment_id, seg);
+    $('#finSeg').textContent = [...segs.values()].filter(s => s.is_final).length;
+    renderSegs();
+  });
+  es.addEventListener('done', async () => {
+    if (es) { es.close(); es = null; }
+    if (pollTimer) clearTimeout(pollTimer);
+    const info = await fetch(`/asr/task/${taskId}`).then(r => r.json()).catch(() => null);
+    if (info) { $('#status').textContent = info.status; setStatusClass(info.status); $('#progress').style.width = '100%'; }
+    if (info && info.status === 'done') {
+      const res = await fetch(`/asr/task/${taskId}/result`).then(r => r.json());
+      $('#fullText').value = res.text || '';
+      $('#duration').textContent = res.duration ? fmtDur(res.duration) : '—';
+      switchTab('final');
+    }
+  });
+  es.onerror = () => { if (es) { es.close(); es = null; } };
+}
+
+async function poll() {
+  if (!taskId) return;
+  try {
+    const info = await fetch(`/asr/task/${taskId}`).then(r => r.json());
+    $('#status').textContent = info.status;
+    setStatusClass(info.status);
+    if (info.total_segments > 0) { $('#totalSeg').textContent = info.total_segments; $('#emptyHint').classList.add('hidden'); }
+    $('#progress').style.width = ((info.progress || 0) * 100).toFixed(1) + '%';
+    if (info.status !== 'done' && info.status !== 'failed') pollTimer = setTimeout(poll, 1000);
+  } catch (e) { pollTimer = setTimeout(poll, 2000); }
+}
+
+function renderSegs() {
+  const tbody = $('#segTable tbody');
+  const rows = [...segs.values()].sort((a, b) => a.segment_id - b.segment_id);
+  if (rows.length) $('#emptyHint').classList.add('hidden');
+  tbody.innerHTML = rows.map(s => `
+    <tr>
+      <td class="id">#${s.segment_id}</td>
+      <td class="range">${fmtTime(s.start)} – ${fmtTime(s.end)}</td>
+      <td class="text ${s.error ? 'err' : ''}">${esc(s.error ? '⚠ ' + s.error : (s.text || '…'))}</td>
+    </tr>`).join('');
+}
+
+function setStatusClass(status) {
+  const p = $('#statusPill');
+  p.className = 'pill s-' + status;
+}
+
+function fmtTime(s) {
+  const m = Math.floor(s / 60), sec = (s % 60).toFixed(1);
+  return `${String(m).padStart(2, '0')}:${sec.padStart(4, '0')}`;
+}
+function fmtDur(s) {
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = Math.floor(s % 60);
+  return h ? `${h}h${m}m` : `${m}m${sec}s`;
+}
+function esc(s) { return (s || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.pane === name));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
+}
+
+function reset() {
+  if (es) { es.close(); es = null; }
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  segs.clear(); taskId = null;
+  $('#segTable tbody').innerHTML = '';
+  $('#fullText').value = '';
+  $('#progress').style.width = '0%';
+  $('#finSeg').textContent = '0';
+  $('#totalSeg').textContent = '—';
+  $('#duration').textContent = '—';
+  $('#status').textContent = '—';
+  $('#statusPill').className = 'pill';
+  $('#taskId').textContent = '—';
+  $('#emptyHint').classList.remove('hidden');
+  fileInput.value = '';
+  switchTab('live');
+}
+</script>
+</body>
+</html>

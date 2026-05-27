@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router as asr_router
 from app.config import get_settings
 from app.services.stream_manager import TaskManager
+
+
+WEB_DIR = Path(__file__).parent / "web"
 
 
 def create_app() -> FastAPI:
@@ -27,6 +32,9 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    if WEB_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     return app
 
