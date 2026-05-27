@@ -129,6 +129,25 @@
   .seg-detail { padding: 12px 14px; background: #131720; }
   .seg-detail pre { margin: 0; max-height: 260px; overflow: auto; font-family: var(--mono); font-size: 11px; color: #b9c2d1; white-space: pre-wrap; word-break: break-all; }
   td.elapsed { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+
+  /* Editable config form */
+  .config-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; }
+  .config-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .config-form label .ftitle { display: flex; justify-content: space-between; align-items: center; }
+  .config-form label .badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #2a3142; color: #b6c0d3; font-family: var(--mono); }
+  .config-form label .badge.set { background: #1e3a2a; color: var(--ok); }
+  .config-form input[type=text], .config-form input[type=password], .config-form input[type=number], .config-form select {
+    background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 13px;
+    font-family: -apple-system, sans-serif;
+  }
+  .config-form input::placeholder { color: #4a5466; }
+  .config-form .check { flex-direction: row; align-items: center; gap: 8px; color: var(--fg); cursor: pointer; }
+  .config-form .check input { width: 14px; height: 14px; }
+  .config-form .dirty input, .config-form .dirty select { border-color: var(--accent); }
+  .save-toast { font-family: var(--mono); font-size: 12px; }
+  .save-toast.ok { color: var(--ok); }
+  .save-toast.err { color: var(--err); }
 </style>
 </head>
 <body>
@@ -140,11 +159,13 @@
   </header>
 
   <details class="settings" id="settingsPanel">
-    <summary><b>服务配置</b><span class="sub" id="settingsSummary">点击查看 / 测试连接</span></summary>
+    <summary><b>服务配置</b><span class="sub" id="settingsSummary">点击展开 · 可编辑保存 · 测试连接</span></summary>
     <div class="settings-body">
-      <div class="settings-grid" id="configGrid"><span class="kv"><span>加载中…</span><span>—</span></span></div>
+      <form id="configForm" class="config-form" autocomplete="off"></form>
       <div class="ping-row">
-        <button id="pingBtn">测试连接</button>
+        <button type="button" id="saveCfgBtn" class="primary">保存</button>
+        <button type="button" id="resetCfgBtn">重置为 .env 默认</button>
+        <button type="button" id="pingBtn">测试连接</button>
         <span class="ping-status" id="pingStatus">未测试</span>
       </div>
     </div>
@@ -261,37 +282,192 @@ function sseUrl(path) {
 })();
 
 const CONFIG_FIELDS = [
-  ['provider', 'ASR Provider'],
-  ['model', 'Model'],
-  ['base_url', 'Base URL'],
-  ['language', 'Language'],
-  ['timestamps', 'Word timestamps'],
-  ['hotwords', 'Hotwords'],
-  ['prompt_hints', 'Prompt hints'],
-  ['split_strategy', 'Split strategy'],
-  ['chunk_seconds', 'Chunk (s)'],
-  ['overlap_seconds', 'Overlap (s)'],
-  ['concurrency', 'Concurrency'],
-  ['max_retries', 'Max retries'],
-  ['api_key_set', 'API key set'],
+  // [key, label, type, options]
+  ['asr_provider',          'Provider',         'select'],
+  ['asr_model',             'Model',            'text'],
+  ['asr_base_url',          'Base URL',         'text'],
+  ['asr_api_key',           'API Key',          'secret'],
+  ['asr_language',          'Language',         'text', { placeholder: 'zh / en / 留空 = auto' }],
+  ['asr_timestamps',        'Word timestamps',  'bool'],
+  ['asr_hotwords',          'Hotwords',         'text', { placeholder: '逗号分隔' }],
+  ['asr_prompt_hints',      'Prompt hints',     'text'],
+  ['asr_concurrency',       'Concurrency',      'int'],
+  ['asr_max_retries',       'Max retries',      'int'],
+  ['asr_retry_backoff',     'Retry backoff',    'float'],
+  ['asr_timeout',           'ASR timeout (s)',  'float'],
+  ['split_strategy',        'Split strategy',   'select-split'],
+  ['split_chunk_seconds',   'Chunk seconds',    'float'],
+  ['split_overlap_seconds', 'Overlap seconds',  'float'],
+  ['silence_noise_db',      'Silence noise dB', 'float'],
+  ['silence_min_duration',  'Silence min dur',  'float'],
+  ['max_upload_bytes',      'Max upload bytes', 'int'],
+  ['access_tokens',         'Access tokens',    'secret', { placeholder: '逗号分隔，留空 = 关闭鉴权' }],
 ];
+
+const CFG_KEY_TO_API_KEY = {
+  asr_provider: 'provider', asr_model: 'model', asr_base_url: 'base_url',
+  asr_language: 'language', asr_timestamps: 'timestamps',
+  asr_hotwords: 'hotwords', asr_prompt_hints: 'prompt_hints',
+  asr_concurrency: 'concurrency', asr_max_retries: 'max_retries',
+  asr_retry_backoff: 'retry_backoff', asr_timeout: 'timeout',
+  split_strategy: 'split_strategy', split_chunk_seconds: 'chunk_seconds',
+  split_overlap_seconds: 'overlap_seconds', silence_noise_db: 'silence_noise_db',
+  silence_min_duration: 'silence_min_duration', max_upload_bytes: 'max_upload_bytes',
+};
+
+let _currentConfig = null;
+
+function renderConfigForm(cfg) {
+  _currentConfig = cfg;
+  const form = $('#configForm');
+  form.innerHTML = '';
+  for (const [key, label, type, opts = {}] of CONFIG_FIELDS) {
+    const wrap = document.createElement('label');
+    wrap.dataset.key = key;
+    wrap.dataset.type = type;
+    const title = document.createElement('div');
+    title.className = 'ftitle';
+    title.innerHTML = `<span>${label}</span>`;
+    wrap.appendChild(title);
+
+    let input;
+    const apiKey = CFG_KEY_TO_API_KEY[key];
+    if (type === 'select') {
+      input = document.createElement('select');
+      for (const p of (cfg.available_providers || [])) {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = p;
+        input.appendChild(opt);
+      }
+      input.value = cfg[apiKey] || '';
+    } else if (type === 'select-split') {
+      input = document.createElement('select');
+      for (const v of ['fixed', 'silence', 'overlap']) {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = v;
+        input.appendChild(opt);
+      }
+      input.value = cfg[apiKey] || 'silence';
+    } else if (type === 'bool') {
+      wrap.classList.add('check');
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = !!cfg[apiKey];
+      // for booleans we put the input first, label text already there
+      title.remove();
+      const tx = document.createElement('span');
+      tx.textContent = label;
+      wrap.appendChild(input);
+      wrap.appendChild(tx);
+    } else if (type === 'secret') {
+      input = document.createElement('input');
+      input.type = 'password';
+      input.placeholder = opts.placeholder || '输入新值以更新，留空保持不变';
+      const setFlag = key === 'asr_api_key' ? cfg.api_key_set : (cfg.access_tokens_count > 0);
+      const badge = document.createElement('span');
+      badge.className = 'badge' + (setFlag ? ' set' : '');
+      badge.textContent = setFlag ? (key === 'access_tokens' ? `已设置 ${cfg.access_tokens_count} 个` : '已设置') : '未设置';
+      title.appendChild(badge);
+    } else if (type === 'int' || type === 'float') {
+      input = document.createElement('input');
+      input.type = 'number';
+      if (type === 'float') input.step = '0.1';
+      input.value = cfg[apiKey] ?? '';
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.value = cfg[apiKey] ?? '';
+      if (opts.placeholder) input.placeholder = opts.placeholder;
+    }
+    if (type !== 'bool') wrap.appendChild(input);
+
+    const markDirty = () => { wrap.classList.add('dirty'); input.dataset.touched = 'yes'; };
+    input.addEventListener('input', markDirty);
+    input.addEventListener('change', markDirty);
+
+    form.appendChild(wrap);
+  }
+  $('#settingsSummary').textContent = `${cfg.provider} · ${cfg.model} · ${cfg.base_url}`;
+}
+
+function collectConfigDiff() {
+  const out = {};
+  document.querySelectorAll('#configForm label').forEach(wrap => {
+    const key = wrap.dataset.key;
+    const type = wrap.dataset.type;
+    const input = wrap.querySelector('input, select');
+    if (!input || !input.dataset.touched) return;
+    if (type === 'secret') {
+      // empty = leave unchanged (don't send); explicit clear must be done via reset
+      const v = input.value;
+      if (v !== '') out[key] = v;
+      return;
+    }
+    if (type === 'bool') { out[key] = input.checked; return; }
+    if (type === 'int') {
+      const n = parseInt(input.value, 10);
+      if (Number.isFinite(n)) out[key] = n;
+      return;
+    }
+    if (type === 'float') {
+      const f = parseFloat(input.value);
+      if (Number.isFinite(f)) out[key] = f;
+      return;
+    }
+    // text / select / select-split
+    out[key] = input.value;
+  });
+  return out;
+}
 
 async function loadConfig() {
   try {
     const cfg = await authedFetch('/asr/config').then(r => r.json());
-    const grid = $('#configGrid');
-    grid.innerHTML = '';
-    for (const [k, label] of CONFIG_FIELDS) {
-      let val = cfg[k];
-      if (Array.isArray(val)) val = val.length ? val.join(', ') : '(空)';
-      if (val === null || val === undefined || val === '') val = '(空)';
-      if (typeof val === 'boolean') val = val ? '是' : '否';
-      const warn = (k === 'api_key_set' && cfg[k] === false) ? ' warn' : '';
-      grid.insertAdjacentHTML('beforeend', `<span class="kv${warn}"><span>${label}</span><span title="${esc(String(val))}">${esc(String(val))}</span></span>`);
-    }
-    $('#settingsSummary').textContent = `${cfg.provider} · ${cfg.model} · ${cfg.base_url}`;
+    renderConfigForm(cfg);
   } catch (e) { /* ignore */ }
 }
+
+$('#saveCfgBtn').addEventListener('click', async () => {
+  const diff = collectConfigDiff();
+  const status = $('#pingStatus');
+  if (Object.keys(diff).length === 0) {
+    status.className = 'ping-status'; status.textContent = '无改动';
+    return;
+  }
+  status.className = 'ping-status'; status.textContent = '保存中…';
+  try {
+    const r = await authedFetch('/asr/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(diff),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `${r.status}`);
+    }
+    const cfg = await r.json();
+    renderConfigForm(cfg);
+    status.className = 'ping-status ok';
+    status.textContent = `✓ 已保存 ${Object.keys(diff).length} 项`;
+  } catch (e) {
+    status.className = 'ping-status err';
+    status.textContent = '✗ ' + e.message;
+  }
+});
+
+$('#resetCfgBtn').addEventListener('click', async () => {
+  if (!confirm('确认丢弃所有运行时改动，回到 .env 默认值？')) return;
+  const status = $('#pingStatus');
+  status.className = 'ping-status'; status.textContent = '重置中…';
+  try {
+    const r = await authedFetch('/asr/config/reset', { method: 'POST' });
+    const cfg = await r.json();
+    renderConfigForm(cfg);
+    status.className = 'ping-status ok'; status.textContent = '✓ 已重置';
+  } catch (e) {
+    status.className = 'ping-status err'; status.textContent = '✗ ' + e.message;
+  }
+});
 
 $('#pingBtn').addEventListener('click', async () => {
   const status = $('#pingStatus');

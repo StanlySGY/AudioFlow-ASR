@@ -14,7 +14,7 @@
 - 失败分片隔离，自动指数退避重试
 - 任务结果持久化到 `outputs/`，进程重启后 `/result` 仍可用
 - Docker 一键部署（内置 ffmpeg）
-- 内置 Web UI（拖拽上传 + 实时分片进度 + 完整文本/字幕复制下载 + 配置面板 + 上游连通测试 + 单分片原始响应查看）
+- 内置 Web UI（拖拽上传 + 实时分片进度 + 完整文本/字幕复制下载 + 配置面板**可在线编辑保存** + 上游连通测试 + 单分片原始响应查看）
 
 ## 快速开始
 
@@ -28,6 +28,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 需要本机已安装 `ffmpeg` 与 `ffprobe`。访问 `http://localhost:8000/` 打开 Web UI，`/docs` 查看 API。
+
+> **运行时配置编辑**：UI 顶部「服务配置」面板可直接修改 provider、base URL、API key、模型、热词、切分参数、鉴权令牌等，点保存即时生效，不需重启服务。改动持久化到 `runtime_config.json`，下次启动自动恢复。点击「重置为 .env 默认」可一键清除运行时改动。注意：`runtime_config.json` 是明文且包含 API key / 访问令牌，部署时确保文件权限合理。
 
 ### Docker
 
@@ -98,8 +100,10 @@ ASR_MODEL=qwen3-asr-flash
 | --- | --- | --- |
 | GET  | `/` | Web UI |
 | GET  | `/auth/info` | 查询是否启用鉴权（`{auth_required: bool}`） |
-| GET  | `/asr/config` | 当前生效配置（不含 API key） |
-| POST | `/asr/ping` | 用 1s 静音 WAV 试探上游 ASR，返回 `{ok, elapsed_ms, model, error?}` |
+| GET  | `/asr/config` | 当前生效配置（不含 API key / access tokens 明文，只暴露 `*_set` / `*_count`） |
+| POST | `/asr/config` | 更新运行时配置（白名单字段）；自动持久化到 `runtime_config.json`，**不需重启** |
+| POST | `/asr/config/reset` | 清除运行时改动，所有白名单字段回到 `.env` 默认 |
+| POST | `/asr/ping` | 用 1s 静音 WAV 试探上游 ASR |
 | POST | `/asr/task` | `multipart/form-data` 上传音频，返回 `task_id`。可选覆盖字段：`model`、`language`、`split_strategy`、`chunk_seconds`、`overlap_seconds`、`hotwords`、`prompt_hints`、`timestamps`，仅作用于本次任务 |
 | GET  | `/asr/task/{task_id}` | 任务状态与进度 |
 | GET  | `/asr/task/{task_id}/stream` | SSE 流式推送每个分片的识别事件（含 `elapsed_ms`） |

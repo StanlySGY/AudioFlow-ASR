@@ -39,11 +39,13 @@ def test_config_exposes_settings_without_secrets(client):
     data = r.json()
     assert data["provider"] == "openai_compat"
     assert data["model"] == "qwen3-asr-flash"
-    assert data["hotwords"] == ["千问", "ASR"]
+    assert data["hotwords"] == "千问,ASR"
     assert data["api_key_set"] is True
+    assert data["access_tokens_count"] == 0
     # secret must not be leaked
     assert "api_key" not in data
     assert "secret" not in str(data)
+    assert "access_tokens" not in data
 
 
 @respx.mock

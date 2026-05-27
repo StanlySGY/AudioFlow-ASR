@@ -1,8 +1,14 @@
+from __future__ import annotations
+
+import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -36,6 +42,7 @@ class Settings(BaseSettings):
 
     temp_dir: Path = Path("./temp")
     output_dir: Path = Path("./outputs")
+    runtime_config_path: Path = Path("./runtime_config.json")
 
     host: str = "0.0.0.0"
     port: int = 8000
@@ -50,9 +57,86 @@ class Settings(BaseSettings):
         return [w.strip() for w in self.asr_hotwords.split(",") if w.strip()]
 
 
+# Fields the UI / API is allowed to change at runtime. Operational and dir
+# fields stay env-only because changing them mid-flight is meaningless or
+# dangerous.
+WRITABLE_FIELDS: frozenset[str] = frozenset({
+    "asr_provider", "asr_base_url", "asr_api_key", "asr_model",
+    "asr_language", "asr_timeout", "asr_timestamps",
+    "asr_hotwords", "asr_prompt_hints",
+    "asr_concurrency", "asr_max_retries", "asr_retry_backoff",
+    "split_strategy", "split_chunk_seconds", "split_overlap_seconds",
+    "silence_noise_db", "silence_min_duration",
+    "max_upload_bytes",
+    "access_tokens",
+})
+
+# Never returned by GET /asr/config in cleartext. Only a `*_set` boolean.
+SENSITIVE_FIELDS: frozenset[str] = frozenset({"asr_api_key", "access_tokens"})
+
+
+def _load_runtime_overrides(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            log.warning("runtime overrides at %s is not a JSON object, ignoring", path)
+            return {}
+        return {k: v for k, v in data.items() if k in WRITABLE_FIELDS}
+    except Exception:  # noqa: BLE001
+        log.warning("failed to load runtime overrides from %s", path, exc_info=True)
+        return {}
+
+
+def _apply_to(settings: Settings, overrides: dict) -> None:
+    for k, v in overrides.items():
+        if k in WRITABLE_FIELDS:
+            try:
+                setattr(settings, k, v)
+            except Exception:  # noqa: BLE001
+                log.warning("failed to apply runtime override %s=%r", k, v, exc_info=True)
+
+
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
     s.temp_dir.mkdir(parents=True, exist_ok=True)
     s.output_dir.mkdir(parents=True, exist_ok=True)
+    _apply_to(s, _load_runtime_overrides(s.runtime_config_path))
     return s
+
+
+def update_runtime_overrides(updates: dict) -> dict:
+    """Validate, persist, and apply runtime overrides. Returns the applied dict."""
+    s = get_settings()
+    bad = [k for k in updates if k not in WRITABLE_FIELDS]
+    if bad:
+        raise ValueError(f"fields not writable: {bad}")
+
+    # Force pydantic field validation by validating a merged dict.
+    merged = s.model_dump()
+    merged.update(updates)
+    try:
+        Settings.model_validate(merged)
+    except ValidationError as e:
+        raise ValueError(str(e)) from e
+
+    existing = _load_runtime_overrides(s.runtime_config_path)
+    existing.update(updates)
+    s.runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
+    s.runtime_config_path.write_text(
+        json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+
+    _apply_to(s, updates)
+    return updates
+
+
+def reset_runtime_overrides() -> None:
+    """Delete the runtime config file and restore .env defaults on the live Settings."""
+    s = get_settings()
+    s.runtime_config_path.unlink(missing_ok=True)
+    env_only = Settings()
+    for field in WRITABLE_FIELDS:
+        setattr(s, field, getattr(env_only, field))

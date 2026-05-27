@@ -13,7 +13,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
-from app.config import get_settings
+from app.config import (
+    SENSITIVE_FIELDS,
+    WRITABLE_FIELDS,
+    get_settings,
+    reset_runtime_overrides,
+    update_runtime_overrides,
+)
 from app.models.schemas import TaskInfo, TaskResult, TaskStatus
 from app.security import require_token
 from app.services.asr import ASRError, create_provider, list_providers
@@ -163,8 +169,9 @@ async def get_config() -> dict:
         "base_url": s.asr_base_url,
         "model": s.asr_model,
         "language": s.asr_language,
+        "timeout": s.asr_timeout,
         "timestamps": s.asr_timestamps,
-        "hotwords": s.asr_hotwords_list,
+        "hotwords": s.asr_hotwords,
         "prompt_hints": s.asr_prompt_hints,
         "split_strategy": s.split_strategy,
         "chunk_seconds": s.split_chunk_seconds,
@@ -173,9 +180,47 @@ async def get_config() -> dict:
         "silence_min_duration": s.silence_min_duration,
         "concurrency": s.asr_concurrency,
         "max_retries": s.asr_max_retries,
+        "retry_backoff": s.asr_retry_backoff,
         "max_upload_bytes": s.max_upload_bytes,
         "api_key_set": bool(s.asr_api_key),
+        "access_tokens_count": len(s.access_tokens_list),
+        "writable_fields": sorted(WRITABLE_FIELDS),
+        "sensitive_fields": sorted(SENSITIVE_FIELDS),
+        "runtime_config_path": str(s.runtime_config_path),
     }
+
+
+@router.post("/config")
+async def post_config(body: dict) -> dict:
+    """Update runtime overrides (validated, persisted, applied to live Settings)."""
+    if not isinstance(body, dict):
+        raise HTTPException(400, "body must be a JSON object")
+    if not body:
+        raise HTTPException(400, "no fields to update")
+
+    # Empty-string fields are kept (user wants to clear), but we strip None.
+    updates = {k: v for k, v in body.items() if v is not None}
+
+    if "asr_provider" in updates and updates["asr_provider"] not in list_providers():
+        raise HTTPException(400, f"unknown provider: {updates['asr_provider']}; available: {list_providers()}")
+    if "split_strategy" in updates and updates["split_strategy"] not in {"fixed", "silence", "overlap"}:
+        raise HTTPException(400, "split_strategy must be fixed|silence|overlap")
+
+    try:
+        update_runtime_overrides(updates)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # pydantic validation etc.
+        raise HTTPException(400, f"invalid update: {e}")
+
+    return await get_config()
+
+
+@router.post("/config/reset")
+async def post_config_reset() -> dict:
+    """Drop runtime overrides; revert all writable fields to .env defaults."""
+    reset_runtime_overrides()
+    return await get_config()
 
 
 def _silent_wav_bytes(duration: float = 1.0, sample_rate: int = 16000) -> bytes:

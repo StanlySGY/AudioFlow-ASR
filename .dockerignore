@@ -19,6 +19,7 @@ build
 tests
 temp
 outputs
+runtime_config.json
 .env
 .env.local
 README.md

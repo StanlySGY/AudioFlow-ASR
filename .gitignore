@@ -17,5 +17,6 @@ build/
 .vscode/
 temp/
 outputs/
+runtime_config.json
 !temp/.gitkeep
 !outputs/.gitkeep
