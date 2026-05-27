@@ -76,3 +76,45 @@ async def test_sends_model_and_auth(wav_file: Path):
     body = captured["body"]
     assert b'name="model"' in body and b"qwen3-asr-flash" in body
     assert b'name="language"' in body and b"zh" in body
+
+
+@respx.mock
+async def test_no_prompt_field_when_hotwords_empty(wav_file: Path):
+    captured = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content
+        return httpx.Response(200, json={"text": "ok"})
+
+    respx.post("https://example.test/v1/audio/transcriptions").mock(side_effect=_handler)
+
+    async with ASRClient("https://example.test/v1", "k", "qwen-asr") as c:
+        await c.transcribe(wav_file)
+
+    assert b'name="prompt"' not in captured["body"]
+
+
+@respx.mock
+async def test_hotwords_and_hints_merged_into_prompt(wav_file: Path):
+    captured = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content
+        return httpx.Response(200, json={"text": "ok"})
+
+    respx.post("https://example.test/v1/audio/transcriptions").mock(side_effect=_handler)
+
+    async with ASRClient(
+        "https://example.test/v1", "k", "qwen-asr",
+        hotwords=["千问", "ASR", "声学模型"],
+        prompt_hints="人工智能技术讨论",
+    ) as c:
+        await c.transcribe(wav_file, prompt="说话人A正在讲解")
+
+    body = captured["body"]
+    assert b'name="prompt"' in body
+    # All three sources should appear in the joined prompt.
+    assert "人工智能技术讨论".encode() in body
+    assert "千问".encode() in body and "ASR".encode() in body
+    assert "说话人A正在讲解".encode() in body
+

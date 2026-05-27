@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     asr_timeout: float = 120.0
     asr_provider: str = "openai_compat"
     asr_timestamps: bool = True
+    asr_hotwords: str = ""
+    asr_prompt_hints: str = ""
 
     split_strategy: str = Field("silence", pattern="^(fixed|silence|overlap)$")
     split_chunk_seconds: float = 30.0
@@ -42,6 +44,10 @@ class Settings(BaseSettings):
     @property
     def access_tokens_list(self) -> list[str]:
         return [t.strip() for t in self.access_tokens.split(",") if t.strip()]
+
+    @property
+    def asr_hotwords_list(self) -> list[str]:
+        return [w.strip() for w in self.asr_hotwords.split(",") if w.strip()]
 
 
 @lru_cache

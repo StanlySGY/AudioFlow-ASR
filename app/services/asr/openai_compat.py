@@ -36,6 +36,8 @@ class OpenAICompatProvider:
         max_retries: int = 3,
         retry_backoff: float = 1.5,
         request_timestamps: bool = True,
+        hotwords: list[str] | None = None,
+        prompt_hints: str = "",
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -45,6 +47,8 @@ class OpenAICompatProvider:
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
         self._request_timestamps = request_timestamps
+        self._hotwords = list(hotwords) if hotwords else []
+        self._prompt_hints = prompt_hints.strip()
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "OpenAICompatProvider":
@@ -60,6 +64,16 @@ class OpenAICompatProvider:
             await self._client.aclose()
             self._client = None
 
+    def _build_prompt(self, per_call: str | None) -> str | None:
+        parts: list[str] = []
+        if self._prompt_hints:
+            parts.append(self._prompt_hints)
+        if self._hotwords:
+            parts.append("、".join(self._hotwords))
+        if per_call:
+            parts.append(per_call)
+        return " ".join(parts).strip() or None
+
     def _build_form(self, prompt: str | None) -> dict[str, str | list[str]]:
         form: dict[str, str | list[str]] = {"model": self._model}
         if self._request_timestamps:
@@ -69,8 +83,9 @@ class OpenAICompatProvider:
             form["response_format"] = "json"
         if self._language:
             form["language"] = self._language
-        if prompt:
-            form["prompt"] = prompt
+        final_prompt = self._build_prompt(prompt)
+        if final_prompt:
+            form["prompt"] = final_prompt
         return form
 
     async def transcribe(self, file_path: Path, *, prompt: str | None = None) -> ASRResult:

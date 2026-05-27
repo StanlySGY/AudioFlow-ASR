@@ -36,6 +36,32 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+## 对接自部署 ASR
+
+只要你的服务暴露 OpenAI 兼容的 `POST /v1/audio/transcriptions`，就完全不用改代码。
+
+### vLLM 跑 Qwen3-ASR
+
+```bash
+# .env
+ASR_PROVIDER=openai_compat
+ASR_BASE_URL=http://your-vllm-host:8000/v1
+ASR_API_KEY=                       # 内网无鉴权可留空
+ASR_MODEL=Qwen/Qwen3-ASR-Flash     # 与 vllm serve 时的 --served-model-name 对齐
+```
+
+注意事项：
+- 不同 vLLM 构建对 `response_format=verbose_json` 与 `timestamp_granularities[]` 的支持不一致。若上游返回 400，把 `ASR_TIMESTAMPS=false` 关掉即可——此时拼接自动回落到最长公共子串路径，字幕仍可按分片粒度生成。
+- 需要热词偏置时把 `ASR_HOTWORDS` 填上，例如 `ASR_HOTWORDS=Qwen,vLLM,LoRA`——会以顿号拼接后发到 OpenAI 标准 `prompt` 字段。
+
+### FunASR / SenseVoice / Paraformer 等 OpenAI 兼容网关
+
+同样只改 `ASR_BASE_URL` 和 `ASR_MODEL`。若网关不支持 timestamp 选项，把 `ASR_TIMESTAMPS=false`。
+
+### 自部署服务**非** OpenAI 兼容
+
+新建一个 `app/services/asr/yourprovider.py`，实现 `ASRProvider` 协议（`__aenter__` / `__aexit__` / `transcribe`），用 `@register("yourprovider")` 注册，然后 `ASR_PROVIDER=yourprovider`。`stream_manager` / `merger` / 路由层都不需要改动。
+
 ## API
 
 > 提交任务后，直接打开根路径 `/` 用 Web UI 查看实时进度也可。下面是程序化调用示例。
@@ -99,6 +125,8 @@ curl http://localhost:8000/asr/task/ab12.../result
 | `ASR_API_KEY` | API Key | *(必填)* |
 | `ASR_MODEL` | 模型名 | `qwen3-asr-flash` |
 | `ASR_TIMESTAMPS` | 请求 word 级时间戳（用于时间轴拼接 + 字幕） | `true` |
+| `ASR_HOTWORDS` | 热词偏置，逗号分隔（拼到 OpenAI `prompt` 字段一并发出） | *(空 = 关)* |
+| `ASR_PROMPT_HINTS` | 自由文本上下文提示（同上拼接） | *(空 = 关)* |
 | `SPLIT_STRATEGY` | `fixed` / `silence` / `overlap` | `silence` |
 | `SPLIT_CHUNK_SECONDS` | 分片目标长度 | `30` |
 | `SPLIT_OVERLAP_SECONDS` | 重叠秒数（仅 overlap 策略） | `2` |

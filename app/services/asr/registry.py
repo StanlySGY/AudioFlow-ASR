@@ -28,6 +28,8 @@ def _openai_compat(settings: Settings) -> ASRProvider:
         max_retries=settings.asr_max_retries,
         retry_backoff=settings.asr_retry_backoff,
         request_timestamps=settings.asr_timestamps,
+        hotwords=settings.asr_hotwords_list,
+        prompt_hints=settings.asr_prompt_hints,
     )
 
 
