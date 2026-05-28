@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     max_tasks_in_memory: int = 100
     task_ttl_seconds: int = 3600
 
+    # --- Realtime ---
+    realtime_asr_provider: str = "realtime_mock"
+    realtime_asr_base_url: str = ""
+    realtime_asr_api_key: str = ""
+    realtime_asr_model: str = ""
+    realtime_session_ttl_seconds: int = 300
+    realtime_max_sessions: int = 100
+    realtime_max_chunk_bytes: int = 1024 * 1024  # 1 MiB per audio chunk
+
     access_tokens: str = ""
 
     temp_dir: Path = Path("./temp")
@@ -69,10 +78,17 @@ WRITABLE_FIELDS: frozenset[str] = frozenset({
     "silence_noise_db", "silence_min_duration",
     "max_upload_bytes",
     "access_tokens",
+    "realtime_asr_provider",
+    "realtime_asr_base_url",
+    "realtime_asr_api_key",
+    "realtime_asr_model",
+    "realtime_session_ttl_seconds",
+    "realtime_max_sessions",
+    "realtime_max_chunk_bytes",
 })
 
 # Never returned by GET /asr/config in cleartext. Only a `*_set` boolean.
-SENSITIVE_FIELDS: frozenset[str] = frozenset({"asr_api_key", "access_tokens"})
+SENSITIVE_FIELDS: frozenset[str] = frozenset({"asr_api_key", "access_tokens", "realtime_asr_api_key"})
 
 
 def _load_runtime_overrides(path: Path) -> dict:

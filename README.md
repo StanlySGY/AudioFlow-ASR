@@ -14,7 +14,8 @@
 - 失败分片隔离，自动指数退避重试
 - 任务结果持久化到 `outputs/`，进程重启后 `/result` 仍可用
 - Docker 一键部署（内置 ffmpeg）
-- 内置 Web UI（拖拽上传 + 实时分片进度 + 完整文本/字幕复制下载 + 配置面板**可在线编辑保存** + 上游连通测试 + 单分片原始响应查看）
+- 内置 Web UI（侧边栏多 tab：文件任务 / 实时识别 / 服务配置 / 历史任务；拖拽上传 + 实时分片进度 + 完整文本/字幕复制下载 + 配置面板**可在线编辑保存** + 上游连通测试 + 单分片原始响应查看）
+- **实时识别 pipeline**（POST /asr/realtime/session → POST audio base64 chunks → SSE events → POST end）
 
 ## 快速开始
 
@@ -92,6 +93,111 @@ ASR_MODEL=qwen3-asr-flash
 
 新建一个 `app/services/asr/yourprovider.py`，实现 `ASRProvider` 协议（`__aenter__` / `__aexit__` / `transcribe`），用 `@register("yourprovider")` 注册，然后 `ASR_PROVIDER=yourprovider`。`stream_manager` / `merger` / 路由层都不需要改动。
 
+## 实时识别 (Realtime)
+
+文件任务以外还有一条独立的 **realtime pipeline**：上层应用按 chunk 推送 base64 音频，服务端持续以 SSE 推回 online/final/done 事件。
+
+```text
+POST   /asr/realtime/session            创建会话 → 返回 events/audio/end URL
+POST   /asr/realtime/{id}/audio         { seq, audio: base64, is_final }
+GET    /asr/realtime/{id}/events        SSE: event=online|final|error|done
+POST   /asr/realtime/{id}/end           主动结束
+DELETE /asr/realtime/{id}               关闭并释放
+```
+
+### Provider 抽象
+
+`RealtimeASRProvider` 协议（`app/services/asr/realtime_base.py`）：
+
+```python
+class RealtimeASRProvider(Protocol):
+    async def __aenter__(self): ...
+    async def __aexit__(self, *exc): ...
+    async def start(self, config): ...
+    async def push_audio(self, chunk): ...
+    async def finish(self): ...
+    def events(self): ...      # AsyncIterator[RealtimeASREvent]
+```
+
+内置实现：
+
+| `REALTIME_ASR_PROVIDER` | 用途 |
+| --- | --- |
+| `realtime_mock` | 测试用，按规则产出 online/final/done，无真实模型依赖 |
+| `realtime_http` | 通用 HTTP+SSE 客户端，对接「标准下层 ASR 服务」 |
+
+**标准下层 ASR 协议**（下层模型方需实现）：
+
+```text
+POST   {base}/session                   → { "session_id": "..." }
+POST   {base}/session/{id}/audio        body: { seq, audio, is_final }
+GET    {base}/session/{id}/events       SSE: event=online|final|error|done
+POST   {base}/session/{id}/end
+```
+
+非标准 WebSocket 模型（如 FunASR runtime）**不要**直接接入 AudioFlow-ASR；先在模型服务旁边做一个 shim 把它包成上面这套 HTTP+SSE 协议，再让 `realtime_http` 对接 shim。
+
+### curl 示例
+
+```bash
+# 1. 创建会话
+SID=$(curl -sX POST http://localhost:8000/asr/realtime/session \
+  -H "Content-Type: application/json" \
+  -d '{"sample_rate":16000,"format":"pcm_s16le","channels":1,"language":"zh"}' \
+  | python -c "import json,sys; print(json.load(sys.stdin)['session_id'])")
+echo "session: $SID"
+
+# 2. 订阅 SSE（另起终端）
+curl -N http://localhost:8000/asr/realtime/$SID/events
+
+# 3. 推 chunk（base64 编码的 PCM 数据）
+curl -X POST http://localhost:8000/asr/realtime/$SID/audio \
+  -H "Content-Type: application/json" \
+  -d '{"seq":1,"audio":"AAAAAAAAAAAAAAAA","is_final":false}'
+
+# 4. 结束
+curl -X POST http://localhost:8000/asr/realtime/$SID/end
+
+# 5. 或直接发空 chunk + is_final=true 也行
+curl -X POST http://localhost:8000/asr/realtime/$SID/audio \
+  -H "Content-Type: application/json" \
+  -d '{"seq":99,"audio":"","is_final":true}'
+```
+
+### 浏览器 EventSource 示例
+
+```js
+const r = await fetch('/asr/realtime/session', {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({sample_rate: 16000, format: 'pcm_s16le', channels: 1}),
+});
+const { session_id } = await r.json();
+
+const es = new EventSource(`/asr/realtime/${session_id}/events`);
+es.addEventListener('online', e => console.log('partial:', JSON.parse(e.data).text));
+es.addEventListener('final',  e => console.log('final:',   JSON.parse(e.data).text));
+es.addEventListener('done',   e => { console.log('done'); es.close(); });
+
+async function pushChunk(b64, isFinal=false) {
+  await fetch(`/asr/realtime/${session_id}/audio`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({seq: ++seq, audio: b64, is_final: isFinal}),
+  });
+}
+```
+
+### 音频格式约定
+
+建议 PCM s16le mono 16kHz（chunks 之间无重叠）。其他格式（带 wav header 的整段 wav、webm/opus 等）也能跑通，但下层 provider 自己负责解码——只对 `realtime_mock` 来说音频内容不参与识别。
+
+### Web UI
+
+打开 `/` 后切到「实时识别」tab：
+1. 填会话参数 → 创建会话（自动订阅 SSE）
+2. 选本地音频文件 → 设 chunk 大小 + 发送间隔 → 点「开始发送」
+3. 事件流面板里看 online/final/done 实时滚动；右上角统计 chunks/bytes/events
+4. 也可以手动粘贴一段 base64 单包测试，或直接点「发送 end」
+
 ## API
 
 > 提交任务后，直接打开根路径 `/` 用 Web UI 查看实时进度也可。下面是程序化调用示例。
@@ -110,6 +216,14 @@ ASR_MODEL=qwen3-asr-flash
 | GET  | `/asr/task/{task_id}/result` | 任务最终 JSON 结果（含 segments、word 时间戳、每片耗时与上游 raw） |
 | GET  | `/asr/task/{task_id}/segments/{segment_id}/raw` | 单个分片的 ASR 原始返回（调试用） |
 | GET  | `/asr/task/{task_id}/subtitle?format=srt\|vtt` | 字幕下载 |
+| GET  | `/asr/tasks` | 历史任务列表（内存中 + outputs/ 持久化） |
+| POST | `/asr/realtime/session` | 创建实时会话（body：`RealtimeSessionCreate`） |
+| GET  | `/asr/realtime/sessions` | 当前活跃会话与可用 realtime providers |
+| GET  | `/asr/realtime/{session_id}` | 单个会话状态 |
+| POST | `/asr/realtime/{session_id}/audio` | 推送 base64 音频 chunk |
+| GET  | `/asr/realtime/{session_id}/events` | SSE 持续推送 online/final/done/error |
+| POST | `/asr/realtime/{session_id}/end` | 结束会话 |
+| DELETE | `/asr/realtime/{session_id}` | 删除会话 |
 | GET  | `/health` | 健康检查 |
 
 > 启用鉴权时（`ACCESS_TOKENS=...`），所有 `/asr/*` 请求需附带 `Authorization: Bearer <token>`；SSE 用 `?token=<token>` 查询串。`/`、`/auth/info`、`/health` 不受影响。
@@ -174,22 +288,29 @@ curl http://localhost:8000/asr/task/ab12.../result
 
 ```
 app/
-├── api/              FastAPI 路由 (含 SSE)
+├── api/              FastAPI 路由 (含 SSE / realtime)
 ├── services/
 │   ├── ffmpeg_service.py    标准化 / 探测时长 / 静音检测 / 精确切片
 │   ├── splitter.py          切分策略
 │   ├── asr/                 ASR Provider 抽象层
 │   │   ├── base.py          ASRProvider / ASRResult / WordTime
-│   │   ├── openai_compat.py OpenAI 兼容客户端（DashScope / Whisper / FunASR-shim）
-│   │   └── registry.py      provider 注册表（按 ASR_PROVIDER 选择）
+│   │   ├── openai_compat.py OpenAI 兼容 /audio/transcriptions 客户端
+│   │   ├── openai_chat_audio.py OpenAI 兼容 /chat/completions 客户端
+│   │   ├── realtime_base.py     RealtimeASRProvider 协议
+│   │   ├── realtime_mock.py     测试用 mock realtime provider
+│   │   ├── realtime_http.py     标准下层 HTTP+SSE realtime provider
+│   │   ├── realtime_registry.py realtime provider 注册表
+│   │   └── registry.py      batch provider 注册表
 │   ├── merger.py            时间轴优先 + LCS 回退的去重拼接
 │   ├── subtitles.py         SRT / VTT 字幕生成
-│   └── stream_manager.py    任务编排 + 并发执行 + 多订阅事件流 + 持久化
+│   ├── stream_manager.py    文件任务编排 + 持久化
+│   └── realtime_manager.py  实时会话编排 + 事件流 fan-out
 ├── security.py              Bearer Token 鉴权（可关）
-├── models/schemas.py        数据结构
-├── config.py                环境变量
-└── main.py                  应用入口
-tests/                       核心单元测试
+├── models/schemas.py        数据结构（含 Realtime*）
+├── config.py                环境变量 + 运行时配置叠加
+├── web/index.html           侧边栏多 tab Web UI
+└── main.py                  应用入口（含 lifespan 启停 realtime pump）
+tests/                       核心单元测试 + realtime 测试
 docker-compose.yml           容器编排
 Dockerfile                   含 ffmpeg
 ```

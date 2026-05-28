@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,10 +9,20 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import meta_router, router as asr_router
 from app.config import get_settings
+from app.services.realtime_manager import RealtimeManager
 from app.services.stream_manager import TaskManager
 
 
 WEB_DIR = Path(__file__).parent / "web"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    await app.state.realtime_manager.start()
+    try:
+        yield
+    finally:
+        await app.state.realtime_manager.stop()
 
 
 def create_app() -> FastAPI:
@@ -25,8 +36,10 @@ def create_app() -> FastAPI:
         title="AudioFlow-ASR",
         description="Long-audio splitting + streaming ASR transcription service.",
         version="0.1.0",
+        lifespan=_lifespan,
     )
     app.state.manager = TaskManager(settings)
+    app.state.realtime_manager = RealtimeManager(settings)
     app.include_router(asr_router)
     app.include_router(meta_router)
 

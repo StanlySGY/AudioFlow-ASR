@@ -18,5 +18,7 @@ build/
 temp/
 outputs/
 runtime_config.json
+task.md
+.ace-tool/
 !temp/.gitkeep
 !outputs/.gitkeep

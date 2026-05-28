@@ -6,248 +6,386 @@
 <title>AudioFlow-ASR · 长音频转写</title>
 <style>
   :root {
-    --bg:#0f1115; --panel:#171a21; --panel-2:#1f232c; --border:#272c37;
-    --fg:#e7ebf0; --muted:#8b95a7; --accent:#5b9dff; --accent-2:#3b7bd9;
-    --ok:#3fbf7f; --err:#ef5a5a; --warn:#e2b13a;
+    --bg:#0b0d12; --sidebar:#10131b; --panel:#161a23; --panel-2:#1d222d;
+    --border:#262d3c; --border-soft:#1f2532;
+    --fg:#e6ebf4; --fg-dim:#b8c2d3; --muted:#7d8aa3; --muted-2:#5b6478;
+    --accent:#5b8eff; --accent-2:#3b6fdb; --accent-soft:rgba(91,142,255,0.12);
+    --ok:#3fbf7f; --warn:#e0a83d; --err:#ef5a5a;
     --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+    --sys: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.55 var(--sys); }
+  a { color: var(--accent); text-decoration: none; }
+
+  /* Layout */
+  .app { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 220px; flex-shrink: 0; background: var(--sidebar);
+    border-right: 1px solid var(--border-soft);
+    display: flex; flex-direction: column;
+    position: sticky; top: 0; height: 100vh;
   }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 24px 80px; }
-  header { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
-  header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: .2px; }
-  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
-  header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 20px 18px 16px; border-bottom: 1px solid var(--border-soft); }
+  .brand .logo { width: 28px; height: 28px; border-radius: 7px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; font-size: 14px; }
+  .brand .name { font-weight: 600; font-size: 15px; }
+  .brand .ver { color: var(--muted-2); font-size: 11px; font-family: var(--mono); margin-left: auto; }
+
+  nav.nav { flex: 1; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: 7px; color: var(--fg-dim);
+    cursor: pointer; user-select: none; font-size: 13px;
+  }
+  .nav-item:hover { background: var(--panel); color: var(--fg); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); }
+  .nav-item .ico { width: 18px; text-align: center; opacity: .85; }
+  .nav-group { margin-top: 14px; padding: 0 14px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted-2); }
+
+  .sidebar .foot { padding: 14px 18px; border-top: 1px solid var(--border-soft); font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  .sidebar .foot .row { display: flex; justify-content: space-between; align-items: center; }
+  .sidebar .foot .ok { color: var(--ok); }
+  .sidebar .foot .err { color: var(--err); }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    height: 54px; padding: 0 26px; display: flex; align-items: center; gap: 16px;
+    border-bottom: 1px solid var(--border-soft); background: var(--bg);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .topbar h1 { font-size: 16px; font-weight: 600; margin: 0; }
+  .topbar .crumb { color: var(--muted); font-size: 12px; }
+  .topbar .spacer { flex: 1; }
+  .topbar .pill {
+    font-size: 11px; padding: 3px 10px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--border); font-family: var(--mono); color: var(--muted);
+  }
+  .topbar .pill b { color: var(--fg); font-weight: 500; }
+  .content { padding: 24px 26px 64px; max-width: 1200px; }
+
+  /* Views */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* Cards */
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card h3 .sub { color: var(--muted); font-size: 12px; font-weight: 400; }
+  .card .actions-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 
-  /* Upload */
-  .drop {
-    border: 1.5px dashed #344056; border-radius: 10px;
-    padding: 36px; text-align: center; cursor: pointer;
-    transition: border-color .15s, background .15s;
-    color: var(--muted);
+  /* Buttons */
+  button, .btn {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--fg);
+    padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    font-family: var(--sys);
   }
-  .drop:hover, .drop.drag { border-color: var(--accent); background: #1a2030; color: var(--fg); }
-  .drop strong { color: var(--fg); }
-  .drop small { display: block; margin-top: 6px; font-size: 12px; }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0a0d14; font-weight: 500; }
+  button.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+  button.danger:hover { border-color: var(--err); color: var(--err); }
+  button:disabled { opacity: .45; cursor: not-allowed; border-color: var(--border); }
 
-  /* Status */
-  .row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
-  .row > * { flex: 0 0 auto; }
-  .pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 3px 10px; border-radius: 999px;
-    background: var(--panel-2); border: 1px solid var(--border);
-    font-size: 12px; color: var(--muted);
+  /* Form */
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: var(--sys);
   }
-  .pill b { color: var(--fg); font-weight: 500; }
-  .pill.s-done { color: var(--ok); border-color: #224434; }
-  .pill.s-failed { color: var(--err); border-color: #4a2727; }
-  .pill.s-transcribing, .pill.s-splitting, .pill.s-preprocessing, .pill.s-merging { color: var(--warn); border-color: #4a3d1a; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  textarea { resize: vertical; font: 13px/1.6 var(--sys); }
+  label.field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
+  label.field .ftitle { display: flex; justify-content: space-between; align-items: center; }
+  label.field .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: #2a3142; color: #b6c0d3; font-family: var(--mono); }
+  label.field .badge.set { background: #1e3a2a; color: var(--ok); }
+  label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--fg); cursor: pointer; }
+  label.check input { width: 14px; height: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+  .grid.tight { gap: 8px 14px; }
 
-  .bar { height: 6px; flex: 1 1 240px; background: #232936; border-radius: 999px; overflow: hidden; min-width: 200px; }
-  .bar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); width: 0%; transition: width .3s; }
+  /* Badges & status */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; padding: 2px 9px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-family: var(--mono);
+  }
+  .badge.ok { color: var(--ok); border-color: #224434; background: rgba(63,191,127,0.08); }
+  .badge.warn { color: var(--warn); border-color: #4a3d1a; background: rgba(224,168,61,0.08); }
+  .badge.err { color: var(--err); border-color: #4a2727; background: rgba(239,90,90,0.08); }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge .dot.pulse { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
-  /* Tabs */
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 4px 0 12px; }
-  .tab { padding: 8px 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
-  .tab.active { color: var(--fg); border-color: var(--accent); }
-  .pane { display: none; }
-  .pane.active { display: block; }
+  /* Stat cards */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .stat .value { font-size: 22px; font-weight: 600; font-family: var(--mono); }
+  .stat .delta { font-size: 11px; color: var(--muted); }
+  .stat.accent .value { color: var(--accent); }
 
-  /* Segments table */
+  /* Tables */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; letter-spacing: .3px; text-transform: uppercase; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; letter-spacing: 0.4px; text-transform: uppercase; }
+  tr.seg-row { cursor: pointer; }
+  tr.seg-row:hover { background: #161b26; }
+  tr.detail-row > td { padding: 0; border-bottom: 1px solid var(--border); }
+  .seg-detail { padding: 14px 16px; background: #11151e; }
+  .seg-detail pre { margin: 0; max-height: 280px; overflow: auto; font-family: var(--mono); font-size: 11px; color: #b9c2d1; white-space: pre-wrap; word-break: break-all; }
   td.id, td.range { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
-  td.text { color: var(--fg); }
   td.text.err { color: var(--err); }
+  td.elapsed { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
   tbody tr { animation: fadeIn .25s ease-out; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
-  .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
 
-  /* Final transcript */
-  textarea#fullText {
-    width: 100%; min-height: 280px; padding: 14px;
-    background: var(--panel-2); color: var(--fg);
-    border: 1px solid var(--border); border-radius: 8px; resize: vertical;
-    font: 14px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-  }
-  .actions { display: flex; gap: 8px; margin-top: 10px; }
-  button {
-    background: var(--panel-2); border: 1px solid var(--border); color: var(--fg);
-    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
-  }
-  button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #0c1019; font-weight: 500; }
-  button.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
-  button:disabled { opacity: .5; cursor: not-allowed; }
+  /* Progress */
+  .bar { height: 6px; background: #20263a; border-radius: 999px; overflow: hidden; flex: 1; min-width: 180px; }
+  .bar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); width: 0%; transition: width .3s; }
+  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
-  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 36px; }
-  footer a { color: var(--muted); }
+  /* Drop zone */
+  .drop {
+    border: 1.5px dashed #344058; border-radius: 10px;
+    padding: 32px; text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s; color: var(--muted);
+  }
+  .drop:hover, .drop.drag { border-color: var(--accent); background: #161e30; color: var(--fg); }
+  .drop strong { color: var(--fg); display: block; margin-bottom: 4px; }
+  .drop small { font-size: 12px; }
+
+  /* Empty state */
+  .empty { padding: 36px 20px; text-align: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--border); border-radius: 10px; }
+  .empty .ico { font-size: 28px; margin-bottom: 6px; opacity: 0.5; }
+
+  /* Realtime event log */
+  .evlog {
+    background: #0d111a; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; height: 280px; overflow: auto;
+    font-family: var(--mono); font-size: 12px; line-height: 1.7;
+  }
+  .evlog .ev { padding: 2px 0; border-bottom: 1px solid #161b27; }
+  .evlog .ev:last-child { border-bottom: none; }
+  .evlog .ev .ty { display: inline-block; min-width: 60px; padding: 0 6px; border-radius: 3px; font-size: 10px; text-transform: uppercase; }
+  .evlog .ev .ty.online { background: #2a3a55; color: #9ec0ff; }
+  .evlog .ev .ty.final  { background: #1e3a2a; color: var(--ok); }
+  .evlog .ev .ty.done   { background: #2a2a2a; color: var(--muted); }
+  .evlog .ev .ty.error  { background: #4a2727; color: var(--err); }
+  .evlog .ts { color: var(--muted-2); margin-right: 8px; }
+
+  /* History list */
+  .hist-item {
+    display: grid; grid-template-columns: 1fr 80px 80px 100px;
+    gap: 14px; padding: 12px 14px; border-bottom: 1px solid var(--border-soft); cursor: pointer; align-items: center;
+  }
+  .hist-item:hover { background: #161b26; }
+  .hist-item .tid { font-family: var(--mono); color: var(--muted); font-size: 11px; }
+  .hist-item .text { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist-item .meta { color: var(--muted); font-size: 11px; font-family: var(--mono); text-align: right; }
+  .hist-empty { padding: 28px; text-align: center; color: var(--muted); }
+
+  /* Toast / status line */
+  .toast {
+    font-family: var(--mono); font-size: 12px; padding: 6px 12px;
+    border-radius: 6px; background: var(--panel-2); color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .toast.ok { color: var(--ok); border-color: #224434; background: rgba(63,191,127,0.08); }
+  .toast.err { color: var(--err); border-color: #4a2727; background: rgba(239,90,90,0.08); }
+
   .hidden { display: none !important; }
-
-  /* Settings panel */
-  details.settings { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; }
-  details.settings > summary { padding: 14px 18px; cursor: pointer; user-select: none; list-style: none; display: flex; align-items: center; gap: 10px; }
-  details.settings > summary::-webkit-details-marker { display: none; }
-  details.settings > summary::before { content: "▸"; transition: transform .15s; color: var(--muted); }
-  details.settings[open] > summary::before { transform: rotate(90deg); }
-  details.settings > summary b { font-weight: 500; }
-  details.settings > summary .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
-  .settings-body { padding: 0 18px 16px; }
-  .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 18px; font-size: 13px; }
-  .settings-grid .kv { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #232936; }
-  .settings-grid .kv span:first-child { color: var(--muted); }
-  .settings-grid .kv span:last-child { font-family: var(--mono); color: var(--fg); text-align: right; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
-  .settings-grid .kv.warn span:last-child { color: var(--warn); }
-  .ping-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
-  .ping-status { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  .ping-status.ok { color: var(--ok); }
-  .ping-status.err { color: var(--err); }
-
-  /* Override form */
-  .overrides { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 14px; margin-top: 12px; }
-  .overrides label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-  .overrides input[type=text], .overrides input[type=number], .overrides select {
-    background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 10px; font-size: 13px;
-    font-family: -apple-system, sans-serif;
-  }
-  .overrides input[type=text]::placeholder, .overrides input[type=number]::placeholder { color: #4a5466; }
-  .overrides .check { flex-direction: row; align-items: center; gap: 8px; color: var(--fg); cursor: pointer; }
-  .overrides .check input { width: 14px; height: 14px; }
-
-  /* Segment row expand */
-  tr.seg-row { cursor: pointer; }
-  tr.seg-row:hover { background: #1a1f29; }
-  tr.detail-row > td { padding: 0; border-bottom: 1px solid var(--border); }
-  .seg-detail { padding: 12px 14px; background: #131720; }
-  .seg-detail pre { margin: 0; max-height: 260px; overflow: auto; font-family: var(--mono); font-size: 11px; color: #b9c2d1; white-space: pre-wrap; word-break: break-all; }
-  td.elapsed { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
-
-  /* Editable config form */
-  .config-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; }
-  .config-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-  .config-form label .ftitle { display: flex; justify-content: space-between; align-items: center; }
-  .config-form label .badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #2a3142; color: #b6c0d3; font-family: var(--mono); }
-  .config-form label .badge.set { background: #1e3a2a; color: var(--ok); }
-  .config-form input[type=text], .config-form input[type=password], .config-form input[type=number], .config-form select {
-    background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 10px; font-size: 13px;
-    font-family: -apple-system, sans-serif;
-  }
-  .config-form input::placeholder { color: #4a5466; }
-  .config-form .check { flex-direction: row; align-items: center; gap: 8px; color: var(--fg); cursor: pointer; }
-  .config-form .check input { width: 14px; height: 14px; }
-  .config-form .dirty input, .config-form .dirty select { border-color: var(--accent); }
-  .save-toast { font-family: var(--mono); font-size: 12px; }
-  .save-toast.ok { color: var(--ok); }
-  .save-toast.err { color: var(--err); }
+  .nowrap { white-space: nowrap; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <span class="dot"></span>
-    <h1>AudioFlow-ASR</h1>
-    <span class="sub">长音频切分 · 流式转写</span>
-  </header>
 
-  <details class="settings" id="settingsPanel">
-    <summary><b>服务配置</b><span class="sub" id="settingsSummary">点击展开 · 可编辑保存 · 测试连接</span></summary>
-    <div class="settings-body">
-      <form id="configForm" class="config-form" autocomplete="off"></form>
-      <div class="ping-row">
-        <button type="button" id="saveCfgBtn" class="primary">保存</button>
-        <button type="button" id="resetCfgBtn">重置为 .env 默认</button>
-        <button type="button" id="pingBtn">测试连接</button>
-        <span class="ping-status" id="pingStatus">未测试</span>
+<div class="app">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">🎙</div>
+      <div>
+        <div class="name">AudioFlow-ASR</div>
+        <div class="ver">v0.2</div>
       </div>
     </div>
-  </details>
-
-  <section class="card" id="uploadCard">
-    <div id="drop" class="drop">
-      <strong>点击选择 或 拖拽音频/视频文件到此处</strong>
-      <small>支持 mp3 / wav / m4a / flac / aac / ogg / mp4 / mov / mkv · 最长 2h+</small>
-      <input type="file" id="file" hidden accept="audio/*,video/*,.pcm">
+    <nav class="nav" id="nav">
+      <div class="nav-item active" data-view="tasks"><span class="ico">📤</span>文件任务</div>
+      <div class="nav-item" data-view="realtime"><span class="ico">🎤</span>实时识别</div>
+      <div class="nav-item" data-view="config"><span class="ico">⚙</span>服务配置</div>
+      <div class="nav-item" data-view="history"><span class="ico">🗂</span>历史任务</div>
+      <div class="nav-group">参考</div>
+      <a class="nav-item" href="/docs" target="_blank"><span class="ico">📖</span>API 文档</a>
+      <a class="nav-item" href="https://github.com/StanlySGY/AudioFlow-ASR" target="_blank"><span class="ico">⭐</span>GitHub</a>
+    </nav>
+    <div class="foot">
+      <div class="row"><span>上游</span><span id="footProvider">—</span></div>
+      <div class="row"><span>状态</span><span id="footStatus">未测</span></div>
+      <div class="row"><span>令牌</span><span id="footAuth">—</span></div>
     </div>
-    <details style="margin-top: 14px;">
-      <summary style="cursor: pointer; color: var(--muted); font-size: 13px; user-select: none;">▸ 仅本次任务覆盖（留空 = 用服务端默认）</summary>
-      <div class="overrides">
-        <label>Model<input type="text" id="ovModel" placeholder="qwen3-asr-flash"></label>
-        <label>Language<input type="text" id="ovLanguage" placeholder="zh / en / auto"></label>
-        <label>Split strategy
-          <select id="ovSplit">
-            <option value="">(默认)</option>
-            <option value="fixed">fixed</option>
-            <option value="silence">silence</option>
-            <option value="overlap">overlap</option>
-          </select>
-        </label>
-        <label>Chunk seconds<input type="number" id="ovChunk" placeholder="30" min="5" step="5"></label>
-        <label>Overlap seconds<input type="number" id="ovOverlap" placeholder="2" min="0" step="0.5"></label>
-        <label>Hotwords<input type="text" id="ovHotwords" placeholder="逗号分隔"></label>
-        <label>Prompt hints<input type="text" id="ovHints" placeholder="自由文本"></label>
-        <label class="check"><input type="checkbox" id="ovTimestamps">请求 word 时间戳</label>
-      </div>
-    </details>
-  </section>
+  </aside>
 
-  <section class="card hidden" id="taskCard">
-    <div class="row" style="margin-bottom: 14px;">
-      <span class="pill">任务 <b id="taskId">—</b></span>
-      <span class="pill" id="statusPill">状态 <b id="status">—</b></span>
-      <span class="pill">分片 <b><span id="finSeg">0</span>/<span id="totalSeg">—</span></b></span>
-      <span class="pill">时长 <b id="duration">—</b></span>
-      <div class="bar"><div id="progress"></div></div>
-      <button id="newBtn">新任务</button>
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">文件任务</h1>
+      <span class="crumb" id="pageCrumb">上传音频 → 自动切分 → 流式转写 → 输出文本/字幕</span>
+      <div class="spacer"></div>
+      <span class="pill">模型 <b id="topModel">—</b></span>
+      <span class="pill">Provider <b id="topProvider">—</b></span>
+      <button id="topTokenBtn" title="设置访问令牌">🔑</button>
     </div>
 
-    <div class="tabs">
-      <div class="tab active" data-pane="live">实时分片</div>
-      <div class="tab" data-pane="final">完整文本</div>
-    </div>
+    <div class="content">
 
-    <div class="pane active" id="pane-live">
-      <table id="segTable">
-        <thead><tr><th style="width:60px">ID</th><th style="width:130px">时间</th><th style="width:80px">耗时</th><th>识别文本</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div class="empty" id="emptyHint">等待分片切分完成 …</div>
-    </div>
+      <!-- ============ VIEW: TASKS ============ -->
+      <section class="view active" id="view-tasks">
+        <div class="card">
+          <div id="drop" class="drop">
+            <strong>点击选择 或 拖拽音频/视频文件到此处</strong>
+            <small>支持 mp3 / wav / m4a / flac / aac / ogg / mp4 / mov / mkv · 最长 2h+</small>
+            <input type="file" id="file" hidden accept="audio/*,video/*,.pcm">
+          </div>
+          <details style="margin-top: 12px;">
+            <summary style="cursor: pointer; color: var(--muted); font-size: 12px; user-select: none;">▸ 仅本次任务覆盖（留空 = 用服务端默认）</summary>
+            <div class="grid tight" style="margin-top: 10px;">
+              <label class="field"><span>Model</span><input type="text" id="ovModel" placeholder="qwen3-asr-flash"></label>
+              <label class="field"><span>Language</span><input type="text" id="ovLanguage" placeholder="zh / en / auto"></label>
+              <label class="field"><span>Split strategy</span>
+                <select id="ovSplit">
+                  <option value="">(默认)</option><option value="fixed">fixed</option>
+                  <option value="silence">silence</option><option value="overlap">overlap</option>
+                </select>
+              </label>
+              <label class="field"><span>Chunk seconds</span><input type="number" id="ovChunk" placeholder="30" min="5" step="5"></label>
+              <label class="field"><span>Overlap seconds</span><input type="number" id="ovOverlap" placeholder="2" min="0" step="0.5"></label>
+              <label class="field"><span>Hotwords</span><input type="text" id="ovHotwords" placeholder="逗号分隔"></label>
+              <label class="field"><span>Prompt hints</span><input type="text" id="ovHints" placeholder="自由文本"></label>
+              <label class="field check"><input type="checkbox" id="ovTimestamps"><span>请求 word 时间戳</span></label>
+            </div>
+          </details>
+        </div>
 
-    <div class="pane" id="pane-final">
-      <textarea id="fullText" placeholder="任务完成后这里将显示拼接后的完整转写文本 …" readonly></textarea>
-      <div class="actions">
-        <button id="copyBtn">复制</button>
-        <button id="downloadBtn">下载 .txt</button>
-        <button id="jsonBtn">下载 .json</button>
-        <button id="srtBtn">下载 .srt</button>
-        <button id="vttBtn">下载 .vtt</button>
-        <button id="tokenBtn" title="更改访问令牌">🔑</button>
-      </div>
-    </div>
-  </section>
+        <div class="card hidden" id="taskCard">
+          <h3>
+            进度
+            <span class="badge" id="taskBadge"><span class="dot pulse"></span><span id="taskStatus">—</span></span>
+            <span class="sub" id="taskTid">—</span>
+          </h3>
+          <div class="row" style="margin-bottom: 12px;">
+            <span class="badge">分片 <b><span id="finSeg">0</span>/<span id="totalSeg">—</span></b></span>
+            <span class="badge">时长 <b id="duration">—</b></span>
+            <div class="bar"><div id="progress"></div></div>
+            <button id="newBtn">新任务</button>
+          </div>
 
-  <footer>
-    <a href="/docs" target="_blank">API 文档</a> · <a href="https://github.com/StanlySGY/AudioFlow-ASR" target="_blank">GitHub</a>
-  </footer>
+          <div style="display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 14px;">
+            <div class="tab active" data-pane="live" style="padding: 8px 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent;">实时分片</div>
+            <div class="tab" data-pane="final" style="padding: 8px 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent;">完整文本</div>
+          </div>
+
+          <div class="pane active" id="pane-live">
+            <table id="segTable">
+              <thead><tr><th style="width:50px">ID</th><th style="width:130px">时间</th><th style="width:80px">耗时</th><th>识别文本</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty hidden" id="emptyHint"><div class="ico">⌛</div>等待分片切分完成 …</div>
+          </div>
+
+          <div class="pane hidden" id="pane-final">
+            <textarea id="fullText" placeholder="任务完成后这里将显示拼接后的完整转写文本 …" readonly style="width: 100%; min-height: 260px;"></textarea>
+            <div class="actions-bar">
+              <button id="copyBtn">复制</button>
+              <button id="downloadBtn">下载 .txt</button>
+              <button id="jsonBtn">下载 .json</button>
+              <button id="srtBtn">下载 .srt</button>
+              <button id="vttBtn">下载 .vtt</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ VIEW: REALTIME ============ -->
+      <section class="view" id="view-realtime">
+        <div class="card">
+          <h3>新建会话 <span class="sub">Realtime ASR · base64 + SSE</span></h3>
+          <div class="grid tight">
+            <label class="field"><span>Language</span><input type="text" id="rtLang" placeholder="zh / en / auto"></label>
+            <label class="field"><span>Sample rate</span><input type="number" id="rtSr" value="16000" min="8000" step="1000"></label>
+            <label class="field"><span>Format</span><input type="text" id="rtFmt" value="pcm_s16le"></label>
+            <label class="field"><span>Channels</span><input type="number" id="rtCh" value="1" min="1" max="2"></label>
+            <label class="field"><span>Mode</span><input type="text" id="rtMode" value="2pass" placeholder="2pass / online"></label>
+            <label class="field"><span>Hotwords</span><input type="text" id="rtHot" placeholder="逗号分隔"></label>
+          </div>
+          <div class="actions-bar">
+            <button class="primary" id="rtCreateBtn">创建会话</button>
+            <span class="toast" id="rtSessInfo">未创建</span>
+          </div>
+        </div>
+
+        <div class="card hidden" id="rtCard">
+          <h3>会话 <span class="sub" id="rtSid">—</span>
+            <span class="badge" id="rtBadge"><span class="dot pulse"></span><span id="rtStatus">—</span></span>
+          </h3>
+          <div class="row" style="margin-bottom: 12px;">
+            <span class="badge">已收 chunks <b id="rtChunks">0</b></span>
+            <span class="badge">字节 <b id="rtBytes">0</b></span>
+          </div>
+
+          <div class="grid tight">
+            <label class="field"><span>本地文件喂入（任意音频，按字节切片 → base64）</span>
+              <input type="file" id="rtFile" accept="audio/*,video/*">
+            </label>
+            <label class="field"><span>Chunk 大小（KB）</span><input type="number" id="rtChunkKB" value="8" min="1" max="64"></label>
+            <label class="field"><span>发送间隔（ms，0 = 不限）</span><input type="number" id="rtIntervalMs" value="100" min="0" step="50"></label>
+            <label class="field"><span>手动 base64 chunk</span><input type="text" id="rtManual" placeholder="选填，发送一次"></label>
+          </div>
+          <div class="actions-bar">
+            <button id="rtFeedBtn" class="primary">开始发送</button>
+            <button id="rtSendOneBtn">发送 manual 一包</button>
+            <button id="rtEndBtn">发送 end</button>
+            <button id="rtDeleteBtn" class="danger">删除会话</button>
+          </div>
+
+          <h3 style="margin-top: 22px;">事件流（SSE）<span class="sub" id="rtEventCount">0 events</span></h3>
+          <div class="evlog" id="rtEvLog"></div>
+        </div>
+      </section>
+
+      <!-- ============ VIEW: CONFIG ============ -->
+      <section class="view" id="view-config">
+        <div class="card">
+          <h3>运行时配置 <span class="sub">改完立即生效，写入 runtime_config.json，重启不丢</span></h3>
+          <form id="configForm" autocomplete="off" class="grid"></form>
+          <div class="actions-bar">
+            <button class="primary" id="saveCfgBtn">保存改动</button>
+            <button id="resetCfgBtn" class="danger">重置为 .env 默认</button>
+            <button id="pingBtn">测试连接</button>
+            <span class="toast" id="pingStatus">未测试</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ VIEW: HISTORY ============ -->
+      <section class="view" id="view-history">
+        <div class="card">
+          <h3>已完成任务 <span class="sub" id="histCount">—</span>
+            <button id="histRefresh" style="margin-left: auto; font-size: 12px; padding: 4px 10px;">刷新</button>
+          </h3>
+          <div id="histList"></div>
+        </div>
+      </section>
+
+    </div>
+  </main>
 </div>
 
 <script>
 const $ = (s) => document.querySelector(s);
-const segs = new Map();
-let taskId = null;
-let es = null;
-let pollTimer = null;
-let authRequired = false;
-
+const $$ = (s) => document.querySelectorAll(s);
+const esc = (s) => (s == null ? '' : String(s)).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const TOKEN_KEY = 'asr_token';
 const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
 const setToken = (t) => { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); };
@@ -264,233 +402,64 @@ async function authedFetch(url, opts = {}) {
   }
   return r;
 }
-function sseUrl(path) {
-  const t = getToken();
-  return t ? `${path}?token=${encodeURIComponent(t)}` : path;
+const sseUrl = (path) => { const t = getToken(); return t ? `${path}?token=${encodeURIComponent(t)}` : path; };
+
+// -------------------- View router --------------------
+const VIEWS = {
+  tasks:    { title: '文件任务',   crumb: '上传音频 → 自动切分 → 流式转写 → 输出文本/字幕' },
+  realtime: { title: '实时识别',   crumb: '创建 session · base64 上行 · SSE 下行 · online/final/done' },
+  config:   { title: '服务配置',   crumb: '运行时编辑保存 · 上游连通测试 · 重置 .env 默认' },
+  history:  { title: '历史任务',   crumb: '从 outputs/ 加载持久化任务结果' },
+};
+function switchView(name) {
+  if (!VIEWS[name]) return;
+  $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === name));
+  $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
+  $('#pageTitle').textContent = VIEWS[name].title;
+  $('#pageCrumb').textContent = VIEWS[name].crumb;
+  // lazy load
+  if (name === 'config') loadConfig();
+  if (name === 'history') loadHistory();
+}
+$$('.nav-item').forEach(n => {
+  if (n.dataset.view) n.addEventListener('click', () => switchView(n.dataset.view));
+});
+$('#topTokenBtn').addEventListener('click', () => {
+  const tok = prompt('访问令牌（留空 = 清除）', getToken());
+  if (tok !== null) { setToken(tok.trim()); refreshTopbar(); }
+});
+
+// -------------------- Topbar + sidebar status --------------------
+async function refreshTopbar() {
+  try {
+    const cfg = await authedFetch('/asr/config').then(r => r.json());
+    _currentConfig = cfg;
+    $('#topModel').textContent = cfg.model || '—';
+    $('#topProvider').textContent = cfg.provider || '—';
+    $('#footProvider').textContent = cfg.provider || '—';
+    $('#footAuth').textContent = (cfg.access_tokens_count || 0) > 0 ? `${cfg.access_tokens_count} 个` : '未启用';
+  } catch (e) { /* ignore */ }
 }
 
-(async function initAuth() {
+// -------------------- Auth probe + initial load --------------------
+(async function init() {
   try {
     const info = await fetch('/auth/info').then(r => r.json());
-    authRequired = !!info.auth_required;
-    if (authRequired && !getToken()) {
+    if (info.auth_required && !getToken()) {
       const tok = prompt('需要访问令牌（已启用鉴权）');
       if (tok) setToken(tok);
     }
   } catch (e) { /* ignore */ }
-  await loadConfig();
+  await refreshTopbar();
 })();
 
-const CONFIG_FIELDS = [
-  // [key, label, type, options]
-  ['asr_provider',          'Provider',         'select'],
-  ['asr_model',             'Model',            'text'],
-  ['asr_base_url',          'Base URL',         'text'],
-  ['asr_api_key',           'API Key',          'secret'],
-  ['asr_language',          'Language',         'text', { placeholder: 'zh / en / 留空 = auto' }],
-  ['asr_timestamps',        'Word timestamps',  'bool'],
-  ['asr_hotwords',          'Hotwords',         'text', { placeholder: '逗号分隔' }],
-  ['asr_prompt_hints',      'Prompt hints',     'text'],
-  ['asr_concurrency',       'Concurrency',      'int'],
-  ['asr_max_retries',       'Max retries',      'int'],
-  ['asr_retry_backoff',     'Retry backoff',    'float'],
-  ['asr_timeout',           'ASR timeout (s)',  'float'],
-  ['split_strategy',        'Split strategy',   'select-split'],
-  ['split_chunk_seconds',   'Chunk seconds',    'float'],
-  ['split_overlap_seconds', 'Overlap seconds',  'float'],
-  ['silence_noise_db',      'Silence noise dB', 'float'],
-  ['silence_min_duration',  'Silence min dur',  'float'],
-  ['max_upload_bytes',      'Max upload bytes', 'int'],
-  ['access_tokens',         'Access tokens',    'secret', { placeholder: '逗号分隔，留空 = 关闭鉴权' }],
-];
-
-const CFG_KEY_TO_API_KEY = {
-  asr_provider: 'provider', asr_model: 'model', asr_base_url: 'base_url',
-  asr_language: 'language', asr_timestamps: 'timestamps',
-  asr_hotwords: 'hotwords', asr_prompt_hints: 'prompt_hints',
-  asr_concurrency: 'concurrency', asr_max_retries: 'max_retries',
-  asr_retry_backoff: 'retry_backoff', asr_timeout: 'timeout',
-  split_strategy: 'split_strategy', split_chunk_seconds: 'chunk_seconds',
-  split_overlap_seconds: 'overlap_seconds', silence_noise_db: 'silence_noise_db',
-  silence_min_duration: 'silence_min_duration', max_upload_bytes: 'max_upload_bytes',
-};
-
-let _currentConfig = null;
-
-function renderConfigForm(cfg) {
-  _currentConfig = cfg;
-  const form = $('#configForm');
-  form.innerHTML = '';
-  for (const [key, label, type, opts = {}] of CONFIG_FIELDS) {
-    const wrap = document.createElement('label');
-    wrap.dataset.key = key;
-    wrap.dataset.type = type;
-    const title = document.createElement('div');
-    title.className = 'ftitle';
-    title.innerHTML = `<span>${label}</span>`;
-    wrap.appendChild(title);
-
-    let input;
-    const apiKey = CFG_KEY_TO_API_KEY[key];
-    if (type === 'select') {
-      input = document.createElement('select');
-      for (const p of (cfg.available_providers || [])) {
-        const opt = document.createElement('option');
-        opt.value = opt.textContent = p;
-        input.appendChild(opt);
-      }
-      input.value = cfg[apiKey] || '';
-    } else if (type === 'select-split') {
-      input = document.createElement('select');
-      for (const v of ['fixed', 'silence', 'overlap']) {
-        const opt = document.createElement('option');
-        opt.value = opt.textContent = v;
-        input.appendChild(opt);
-      }
-      input.value = cfg[apiKey] || 'silence';
-    } else if (type === 'bool') {
-      wrap.classList.add('check');
-      input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = !!cfg[apiKey];
-      // for booleans we put the input first, label text already there
-      title.remove();
-      const tx = document.createElement('span');
-      tx.textContent = label;
-      wrap.appendChild(input);
-      wrap.appendChild(tx);
-    } else if (type === 'secret') {
-      input = document.createElement('input');
-      input.type = 'password';
-      input.placeholder = opts.placeholder || '输入新值以更新，留空保持不变';
-      const setFlag = key === 'asr_api_key' ? cfg.api_key_set : (cfg.access_tokens_count > 0);
-      const badge = document.createElement('span');
-      badge.className = 'badge' + (setFlag ? ' set' : '');
-      badge.textContent = setFlag ? (key === 'access_tokens' ? `已设置 ${cfg.access_tokens_count} 个` : '已设置') : '未设置';
-      title.appendChild(badge);
-    } else if (type === 'int' || type === 'float') {
-      input = document.createElement('input');
-      input.type = 'number';
-      if (type === 'float') input.step = '0.1';
-      input.value = cfg[apiKey] ?? '';
-    } else {
-      input = document.createElement('input');
-      input.type = 'text';
-      input.value = cfg[apiKey] ?? '';
-      if (opts.placeholder) input.placeholder = opts.placeholder;
-    }
-    if (type !== 'bool') wrap.appendChild(input);
-
-    const markDirty = () => { wrap.classList.add('dirty'); input.dataset.touched = 'yes'; };
-    input.addEventListener('input', markDirty);
-    input.addEventListener('change', markDirty);
-
-    form.appendChild(wrap);
-  }
-  $('#settingsSummary').textContent = `${cfg.provider} · ${cfg.model} · ${cfg.base_url}`;
-}
-
-function collectConfigDiff() {
-  const out = {};
-  document.querySelectorAll('#configForm label').forEach(wrap => {
-    const key = wrap.dataset.key;
-    const type = wrap.dataset.type;
-    const input = wrap.querySelector('input, select');
-    if (!input || !input.dataset.touched) return;
-    if (type === 'secret') {
-      // empty = leave unchanged (don't send); explicit clear must be done via reset
-      const v = input.value;
-      if (v !== '') out[key] = v;
-      return;
-    }
-    if (type === 'bool') { out[key] = input.checked; return; }
-    if (type === 'int') {
-      const n = parseInt(input.value, 10);
-      if (Number.isFinite(n)) out[key] = n;
-      return;
-    }
-    if (type === 'float') {
-      const f = parseFloat(input.value);
-      if (Number.isFinite(f)) out[key] = f;
-      return;
-    }
-    // text / select / select-split
-    out[key] = input.value;
-  });
-  return out;
-}
-
-async function loadConfig() {
-  try {
-    const cfg = await authedFetch('/asr/config').then(r => r.json());
-    renderConfigForm(cfg);
-  } catch (e) { /* ignore */ }
-}
-
-$('#saveCfgBtn').addEventListener('click', async () => {
-  const diff = collectConfigDiff();
-  const status = $('#pingStatus');
-  if (Object.keys(diff).length === 0) {
-    status.className = 'ping-status'; status.textContent = '无改动';
-    return;
-  }
-  status.className = 'ping-status'; status.textContent = '保存中…';
-  try {
-    const r = await authedFetch('/asr/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(diff),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `${r.status}`);
-    }
-    const cfg = await r.json();
-    renderConfigForm(cfg);
-    status.className = 'ping-status ok';
-    status.textContent = `✓ 已保存 ${Object.keys(diff).length} 项`;
-  } catch (e) {
-    status.className = 'ping-status err';
-    status.textContent = '✗ ' + e.message;
-  }
-});
-
-$('#resetCfgBtn').addEventListener('click', async () => {
-  if (!confirm('确认丢弃所有运行时改动，回到 .env 默认值？')) return;
-  const status = $('#pingStatus');
-  status.className = 'ping-status'; status.textContent = '重置中…';
-  try {
-    const r = await authedFetch('/asr/config/reset', { method: 'POST' });
-    const cfg = await r.json();
-    renderConfigForm(cfg);
-    status.className = 'ping-status ok'; status.textContent = '✓ 已重置';
-  } catch (e) {
-    status.className = 'ping-status err'; status.textContent = '✗ ' + e.message;
-  }
-});
-
-$('#pingBtn').addEventListener('click', async () => {
-  const status = $('#pingStatus');
-  status.className = 'ping-status';
-  status.textContent = '测试中 …';
-  $('#pingBtn').disabled = true;
-  try {
-    const r = await authedFetch('/asr/ping', { method: 'POST' });
-    const data = await r.json();
-    if (data.ok) {
-      status.className = 'ping-status ok';
-      status.textContent = `✓ ${data.elapsed_ms.toFixed(0)}ms · ${data.model}${data.got_words ? ' · words ✓' : ' · 无时间戳'}`;
-    } else {
-      status.className = 'ping-status err';
-      status.textContent = `✗ ${data.elapsed_ms.toFixed(0)}ms · ${data.error || 'unknown error'}`;
-    }
-  } catch (e) {
-    status.className = 'ping-status err';
-    status.textContent = `✗ ${e.message}`;
-  } finally {
-    $('#pingBtn').disabled = false;
-  }
-});
+// =================================================================
+//   TASKS VIEW (existing file upload + segment progress)
+// =================================================================
+const segs = new Map();
+let taskId = null;
+let es = null;
+let pollTimer = null;
 
 const drop = $('#drop'), fileInput = $('#file');
 drop.addEventListener('click', () => fileInput.click());
@@ -498,37 +467,29 @@ drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.ad
 drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
 drop.addEventListener('drop', (e) => {
   e.preventDefault(); drop.classList.remove('drag');
-  if (e.dataTransfer.files[0]) submit(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files[0]) submitTask(e.dataTransfer.files[0]);
 });
-fileInput.addEventListener('change', () => fileInput.files[0] && submit(fileInput.files[0]));
-
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
-  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + t.dataset.pane));
+fileInput.addEventListener('change', () => fileInput.files[0] && submitTask(fileInput.files[0]));
+$$('#view-tasks .tab').forEach(t => t.addEventListener('click', () => {
+  $$('#view-tasks .tab').forEach(x => {
+    const on = x === t;
+    x.classList.toggle('active', on);
+    x.style.color = on ? 'var(--fg)' : 'var(--muted)';
+    x.style.borderColor = on ? 'var(--accent)' : 'transparent';
+  });
+  $$('#view-tasks .pane').forEach(p => p.classList.toggle('hidden', p.id !== 'pane-' + t.dataset.pane));
 }));
 
-$('#newBtn').addEventListener('click', reset);
+$('#newBtn').addEventListener('click', resetTask);
 $('#copyBtn').addEventListener('click', () => navigator.clipboard.writeText($('#fullText').value));
 $('#downloadBtn').addEventListener('click', () => downloadFile(`${taskId}.txt`, $('#fullText').value, 'text/plain'));
 $('#jsonBtn').addEventListener('click', async () => {
   if (!taskId) return;
-  const r = await authedFetch(`/asr/task/${taskId}/result`); const txt = await r.text();
-  downloadFile(`${taskId}.json`, txt, 'application/json');
+  const r = await authedFetch(`/asr/task/${taskId}/result`); downloadFile(`${taskId}.json`, await r.text(), 'application/json');
 });
 $('#srtBtn').addEventListener('click', () => downloadSubtitle('srt'));
 $('#vttBtn').addEventListener('click', () => downloadSubtitle('vtt'));
-$('#tokenBtn').addEventListener('click', () => {
-  const cur = getToken();
-  const tok = prompt('访问令牌（留空清除）', cur);
-  if (tok !== null) setToken(tok.trim());
-});
-
-async function downloadSubtitle(fmt) {
-  if (!taskId) return;
-  const r = await authedFetch(`/asr/task/${taskId}/subtitle?format=${fmt}`);
-  if (!r.ok) { alert(`字幕下载失败: ${r.status}`); return; }
-  downloadFile(`${taskId}.${fmt}`, await r.text(), fmt === 'srt' ? 'application/x-subrip' : 'text/vtt');
-}
+$('#ovTimestamps').addEventListener('change', (e) => { e.target.dataset.touched = 'yes'; });
 
 function downloadFile(name, content, type) {
   const blob = new Blob([content], { type });
@@ -537,52 +498,44 @@ function downloadFile(name, content, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-async function submit(file) {
-  reset();
+async function downloadSubtitle(fmt) {
+  if (!taskId) return;
+  const r = await authedFetch(`/asr/task/${taskId}/subtitle?format=${fmt}`);
+  if (!r.ok) { alert(`字幕下载失败: ${r.status}`); return; }
+  downloadFile(`${taskId}.${fmt}`, await r.text(), fmt === 'srt' ? 'application/x-subrip' : 'text/vtt');
+}
+
+function collectOverrides() {
+  const o = {};
+  const add = (key, sel) => { const v = $(sel).value.trim(); if (v !== '') o[key] = v; };
+  add('model', '#ovModel'); add('language', '#ovLanguage');
+  add('split_strategy', '#ovSplit');
+  add('chunk_seconds', '#ovChunk'); add('overlap_seconds', '#ovOverlap');
+  add('hotwords', '#ovHotwords'); add('prompt_hints', '#ovHints');
+  if ($('#ovTimestamps').dataset.touched === 'yes') o.timestamps = $('#ovTimestamps').checked ? 'true' : 'false';
+  return o;
+}
+
+async function submitTask(file) {
+  resetTask();
   $('#taskCard').classList.remove('hidden');
-  $('#status').textContent = 'uploading';
+  setTaskStatus('uploading');
   const fd = new FormData(); fd.append('file', file);
-  // attach per-task overrides
-  const ov = collectOverrides();
-  for (const [k, v] of Object.entries(ov)) fd.append(k, v);
+  for (const [k, v] of Object.entries(collectOverrides())) fd.append(k, v);
   try {
     const r = await authedFetch('/asr/task', { method: 'POST', body: fd });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     taskId = data.task_id;
-    $('#taskId').textContent = taskId;
-    start();
+    $('#taskTid').textContent = taskId.slice(0, 16) + '…';
+    startTaskStream();
   } catch (e) {
-    $('#status').textContent = 'upload failed';
-    setStatusClass('failed');
-    alert('上传失败: ' + e.message);
+    setTaskStatus('failed'); alert('上传失败: ' + e.message);
   }
 }
 
-function collectOverrides() {
-  const o = {};
-  const add = (key, sel, parse) => {
-    const v = $(sel).value.trim();
-    if (v !== '') o[key] = parse ? parse(v) : v;
-  };
-  add('model', '#ovModel');
-  add('language', '#ovLanguage');
-  add('split_strategy', '#ovSplit');
-  add('chunk_seconds', '#ovChunk');
-  add('overlap_seconds', '#ovOverlap');
-  add('hotwords', '#ovHotwords');
-  add('prompt_hints', '#ovHints');
-  const tsBox = $('#ovTimestamps');
-  if (tsBox.indeterminate === false && tsBox.dataset.touched === 'yes') {
-    o.timestamps = tsBox.checked ? 'true' : 'false';
-  }
-  return o;
-}
-// mark timestamps checkbox as touched so we send override only when user toggles it
-$('#ovTimestamps').addEventListener('change', (e) => { e.target.dataset.touched = 'yes'; });
-
-function start() {
-  poll();
+function startTaskStream() {
+  pollTask();
   es = new EventSource(sseUrl(`/asr/task/${taskId}/stream`));
   es.addEventListener('segment', (e) => {
     const seg = JSON.parse(e.data);
@@ -594,27 +547,32 @@ function start() {
     if (es) { es.close(); es = null; }
     if (pollTimer) clearTimeout(pollTimer);
     const info = await authedFetch(`/asr/task/${taskId}`).then(r => r.json()).catch(() => null);
-    if (info) { $('#status').textContent = info.status; setStatusClass(info.status); $('#progress').style.width = '100%'; }
+    if (info) { setTaskStatus(info.status); $('#progress').style.width = '100%'; }
     if (info && info.status === 'done') {
       const res = await authedFetch(`/asr/task/${taskId}/result`).then(r => r.json());
       $('#fullText').value = res.text || '';
       $('#duration').textContent = res.duration ? fmtDur(res.duration) : '—';
-      switchTab('final');
+      $$('#view-tasks .tab').forEach(x => x.click && (x.dataset.pane === 'final') && x.click());
     }
   });
   es.onerror = () => { if (es) { es.close(); es = null; } };
 }
 
-async function poll() {
+async function pollTask() {
   if (!taskId) return;
   try {
     const info = await authedFetch(`/asr/task/${taskId}`).then(r => r.json());
-    $('#status').textContent = info.status;
-    setStatusClass(info.status);
+    setTaskStatus(info.status);
     if (info.total_segments > 0) { $('#totalSeg').textContent = info.total_segments; $('#emptyHint').classList.add('hidden'); }
     $('#progress').style.width = ((info.progress || 0) * 100).toFixed(1) + '%';
-    if (info.status !== 'done' && info.status !== 'failed') pollTimer = setTimeout(poll, 1000);
-  } catch (e) { pollTimer = setTimeout(poll, 2000); }
+    if (info.status !== 'done' && info.status !== 'failed') pollTimer = setTimeout(pollTask, 1000);
+  } catch (e) { pollTimer = setTimeout(pollTask, 2000); }
+}
+
+function setTaskStatus(s) {
+  $('#taskStatus').textContent = s;
+  const b = $('#taskBadge');
+  b.className = 'badge ' + ({done: 'ok', failed: 'err'}[s] || 'warn');
 }
 
 function renderSegs() {
@@ -637,19 +595,12 @@ function renderSegs() {
 async function toggleSegDetail(tr) {
   const segId = tr.dataset.seg;
   const next = tr.nextElementSibling;
-  if (next && next.classList.contains('detail-row') && next.dataset.for === segId) {
-    next.remove();
-    return;
-  }
-  // remove other open detail rows
+  if (next && next.classList.contains('detail-row') && next.dataset.for === segId) { next.remove(); return; }
   document.querySelectorAll('tr.detail-row').forEach(r => r.remove());
-
   const row = document.createElement('tr');
-  row.className = 'detail-row';
-  row.dataset.for = segId;
+  row.className = 'detail-row'; row.dataset.for = segId;
   row.innerHTML = `<td colspan="4"><div class="seg-detail"><pre>加载中…</pre></div></td>`;
   tr.after(row);
-
   try {
     const data = await authedFetch(`/asr/task/${taskId}/segments/${segId}/raw`).then(r => r.json());
     row.querySelector('pre').textContent = JSON.stringify(data, null, 2);
@@ -658,41 +609,400 @@ async function toggleSegDetail(tr) {
   }
 }
 
-function setStatusClass(status) {
-  const p = $('#statusPill');
-  p.className = 'pill s-' + status;
-}
+function fmtTime(s) { const m = Math.floor(s/60), sec = (s%60).toFixed(1); return `${String(m).padStart(2,'0')}:${sec.padStart(4,'0')}`; }
+function fmtDur(s) { const h = Math.floor(s/3600), m = Math.floor(s%3600/60), sec = Math.floor(s%60); return h ? `${h}h${m}m` : `${m}m${sec}s`; }
 
-function fmtTime(s) {
-  const m = Math.floor(s / 60), sec = (s % 60).toFixed(1);
-  return `${String(m).padStart(2, '0')}:${sec.padStart(4, '0')}`;
-}
-function fmtDur(s) {
-  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = Math.floor(s % 60);
-  return h ? `${h}h${m}m` : `${m}m${sec}s`;
-}
-function esc(s) { return (s || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
-function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.pane === name));
-  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
-}
-
-function reset() {
+function resetTask() {
   if (es) { es.close(); es = null; }
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   segs.clear(); taskId = null;
   $('#segTable tbody').innerHTML = '';
   $('#fullText').value = '';
   $('#progress').style.width = '0%';
-  $('#finSeg').textContent = '0';
-  $('#totalSeg').textContent = '—';
-  $('#duration').textContent = '—';
-  $('#status').textContent = '—';
-  $('#statusPill').className = 'pill';
-  $('#taskId').textContent = '—';
+  $('#finSeg').textContent = '0'; $('#totalSeg').textContent = '—'; $('#duration').textContent = '—';
+  setTaskStatus('—'); $('#taskBadge').className = 'badge';
+  $('#taskTid').textContent = '—';
   $('#emptyHint').classList.remove('hidden');
   fileInput.value = '';
-  switchTab('live');
+}
+
+// =================================================================
+//   REALTIME VIEW
+// =================================================================
+let rtSid = null;
+let rtEs = null;
+let rtSeq = 0;
+let rtFeeding = false;
+let rtEventCount = 0;
+
+$('#rtCreateBtn').addEventListener('click', async () => {
+  const body = {
+    language: $('#rtLang').value.trim() || null,
+    sample_rate: parseInt($('#rtSr').value, 10) || 16000,
+    format: $('#rtFmt').value.trim() || 'pcm_s16le',
+    channels: parseInt($('#rtCh').value, 10) || 1,
+    mode: $('#rtMode').value.trim() || '2pass',
+    hotwords: $('#rtHot').value.trim() ? $('#rtHot').value.trim().split(',').map(s=>s.trim()).filter(Boolean) : [],
+  };
+  try {
+    const r = await authedFetch('/asr/realtime/session', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const info = await r.json();
+    rtSid = info.session_id;
+    rtSeq = 0; rtEventCount = 0;
+    $('#rtCard').classList.remove('hidden');
+    $('#rtSid').textContent = rtSid.slice(0, 16) + '…';
+    $('#rtStatus').textContent = info.status;
+    $('#rtBadge').className = 'badge warn';
+    $('#rtChunks').textContent = '0'; $('#rtBytes').textContent = '0';
+    $('#rtEvLog').innerHTML = ''; $('#rtEventCount').textContent = '0 events';
+    $('#rtSessInfo').textContent = '✓ ' + rtSid;
+    $('#rtSessInfo').className = 'toast ok';
+    subscribeRealtime();
+  } catch (e) {
+    $('#rtSessInfo').textContent = '✗ ' + e.message;
+    $('#rtSessInfo').className = 'toast err';
+  }
+});
+
+function subscribeRealtime() {
+  if (rtEs) rtEs.close();
+  rtEs = new EventSource(sseUrl(`/asr/realtime/${rtSid}/events`));
+  for (const ty of ['online', 'final', 'done', 'error']) {
+    rtEs.addEventListener(ty, (e) => {
+      const ev = JSON.parse(e.data);
+      addRtEvent(ty, ev);
+      if (ty === 'done' || ty === 'error') {
+        rtEs.close(); rtEs = null;
+        $('#rtStatus').textContent = ty === 'done' ? 'done' : 'failed';
+        $('#rtBadge').className = 'badge ' + (ty === 'done' ? 'ok' : 'err');
+      }
+    });
+  }
+  rtEs.onerror = () => { if (rtEs) { rtEs.close(); rtEs = null; } };
+}
+
+function addRtEvent(type, ev) {
+  rtEventCount++;
+  $('#rtEventCount').textContent = `${rtEventCount} events`;
+  const el = document.createElement('div');
+  el.className = 'ev';
+  const ts = new Date().toLocaleTimeString();
+  const meta = [
+    ev.seq != null ? `seq=${ev.seq}` : '',
+    ev.elapsed_ms ? `${ev.elapsed_ms.toFixed(0)}ms` : '',
+  ].filter(Boolean).join(' ');
+  const text = ev.error ? `<span style="color: var(--err)">${esc(ev.error)}</span>` : esc(ev.text || '');
+  el.innerHTML = `<span class="ts">${ts}</span><span class="ty ${type}">${type}</span> <span style="color: var(--muted)">${meta}</span> ${text}`;
+  $('#rtEvLog').appendChild(el);
+  $('#rtEvLog').scrollTop = $('#rtEvLog').scrollHeight;
+}
+
+async function rtPushChunk(b64, isFinal = false) {
+  rtSeq += 1;
+  const r = await authedFetch(`/asr/realtime/${rtSid}/audio`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({seq: rtSeq, audio: b64, is_final: isFinal}),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    addRtEvent('error', {error: err.detail || `HTTP ${r.status}`});
+    return false;
+  }
+  // refresh info
+  const info = await authedFetch(`/asr/realtime/${rtSid}`).then(r => r.json()).catch(() => null);
+  if (info) { $('#rtChunks').textContent = info.chunks_received; $('#rtBytes').textContent = info.bytes_received; }
+  return true;
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+$('#rtFeedBtn').addEventListener('click', async () => {
+  if (!rtSid) return;
+  const file = $('#rtFile').files[0];
+  if (!file) { alert('请先选择文件'); return; }
+  if (rtFeeding) return;
+  rtFeeding = true;
+  const chunkBytes = Math.max(1, parseInt($('#rtChunkKB').value, 10)) * 1024;
+  const intervalMs = Math.max(0, parseInt($('#rtIntervalMs').value, 10) || 0);
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let offset = 0;
+  $('#rtFeedBtn').disabled = true;
+  while (offset < buf.length && rtFeeding) {
+    const slice = buf.subarray(offset, Math.min(offset + chunkBytes, buf.length));
+    const b64 = bytesToBase64(slice);
+    const ok = await rtPushChunk(b64, false);
+    if (!ok) break;
+    offset += chunkBytes;
+    if (intervalMs > 0) await new Promise(r => setTimeout(r, intervalMs));
+  }
+  // send final
+  if (rtFeeding) await rtPushChunk('', true);
+  rtFeeding = false;
+  $('#rtFeedBtn').disabled = false;
+});
+
+$('#rtSendOneBtn').addEventListener('click', async () => {
+  const v = $('#rtManual').value.trim();
+  if (!rtSid || !v) return;
+  await rtPushChunk(v, false);
+});
+
+$('#rtEndBtn').addEventListener('click', async () => {
+  if (!rtSid) return;
+  await authedFetch(`/asr/realtime/${rtSid}/end`, { method: 'POST' });
+});
+
+$('#rtDeleteBtn').addEventListener('click', async () => {
+  if (!rtSid) return;
+  if (!confirm('删除当前会话？')) return;
+  rtFeeding = false;
+  await authedFetch(`/asr/realtime/${rtSid}`, { method: 'DELETE' });
+  if (rtEs) { rtEs.close(); rtEs = null; }
+  $('#rtCard').classList.add('hidden');
+  $('#rtSessInfo').textContent = '已删除'; $('#rtSessInfo').className = 'toast';
+  rtSid = null;
+});
+
+// =================================================================
+//   CONFIG VIEW
+// =================================================================
+const CONFIG_FIELDS = [
+  ['asr_provider',          'Provider',           'select'],
+  ['asr_model',             'Model',              'text'],
+  ['asr_base_url',          'Base URL',           'text'],
+  ['asr_api_key',           'API Key',            'secret'],
+  ['asr_language',          'Language',           'text'],
+  ['asr_timestamps',        'Word timestamps',    'bool'],
+  ['asr_hotwords',          'Hotwords',           'text'],
+  ['asr_prompt_hints',      'Prompt hints',       'text'],
+  ['asr_concurrency',       'Concurrency',        'int'],
+  ['asr_max_retries',       'Max retries',        'int'],
+  ['asr_retry_backoff',     'Retry backoff',      'float'],
+  ['asr_timeout',           'ASR timeout (s)',    'float'],
+  ['split_strategy',        'Split strategy',     'select-split'],
+  ['split_chunk_seconds',   'Chunk seconds',      'float'],
+  ['split_overlap_seconds', 'Overlap seconds',    'float'],
+  ['silence_noise_db',      'Silence noise dB',   'float'],
+  ['silence_min_duration',  'Silence min dur',    'float'],
+  ['max_upload_bytes',      'Max upload bytes',   'int'],
+  ['realtime_asr_provider', 'Realtime Provider',  'select-realtime'],
+  ['realtime_asr_base_url', 'Realtime Base URL',  'text'],
+  ['realtime_asr_api_key',  'Realtime API Key',   'secret'],
+  ['realtime_asr_model',    'Realtime Model',     'text'],
+  ['realtime_max_chunk_bytes', 'Realtime chunk max bytes', 'int'],
+  ['realtime_session_ttl_seconds', 'Realtime session TTL', 'int'],
+  ['access_tokens',         'Access tokens',      'secret'],
+];
+const CFG_KEY_TO_API = {
+  asr_provider: 'provider', asr_model: 'model', asr_base_url: 'base_url',
+  asr_language: 'language', asr_timestamps: 'timestamps',
+  asr_hotwords: 'hotwords', asr_prompt_hints: 'prompt_hints',
+  asr_concurrency: 'concurrency', asr_max_retries: 'max_retries',
+  asr_retry_backoff: 'retry_backoff', asr_timeout: 'timeout',
+  split_strategy: 'split_strategy', split_chunk_seconds: 'chunk_seconds',
+  split_overlap_seconds: 'overlap_seconds', silence_noise_db: 'silence_noise_db',
+  silence_min_duration: 'silence_min_duration', max_upload_bytes: 'max_upload_bytes',
+};
+let _currentConfig = null;
+let _realtimeProviders = ['realtime_mock', 'realtime_http'];
+
+async function loadConfig() {
+  try {
+    const cfg = await authedFetch('/asr/config').then(r => r.json());
+    _currentConfig = cfg;
+    try {
+      const rt = await authedFetch('/asr/realtime/sessions').then(r => r.json());
+      _realtimeProviders = rt.providers || _realtimeProviders;
+    } catch (e) {}
+    renderConfigForm(cfg);
+  } catch (e) { /* ignore */ }
+}
+
+function renderConfigForm(cfg) {
+  const form = $('#configForm');
+  form.innerHTML = '';
+  for (const [key, label, type] of CONFIG_FIELDS) {
+    const wrap = document.createElement('label');
+    wrap.className = 'field';
+    wrap.dataset.key = key; wrap.dataset.type = type;
+    const title = document.createElement('div'); title.className = 'ftitle';
+    title.innerHTML = `<span>${label}</span>`;
+    wrap.appendChild(title);
+
+    const apiKey = CFG_KEY_TO_API[key];
+    let input;
+    if (type === 'select') {
+      input = document.createElement('select');
+      for (const p of (cfg.available_providers || [])) {
+        const opt = document.createElement('option'); opt.value = opt.textContent = p; input.appendChild(opt);
+      }
+      input.value = cfg[apiKey] || '';
+    } else if (type === 'select-split') {
+      input = document.createElement('select');
+      for (const v of ['fixed', 'silence', 'overlap']) {
+        const opt = document.createElement('option'); opt.value = opt.textContent = v; input.appendChild(opt);
+      }
+      input.value = cfg[apiKey] || 'silence';
+    } else if (type === 'select-realtime') {
+      input = document.createElement('select');
+      for (const p of _realtimeProviders) { const opt = document.createElement('option'); opt.value = opt.textContent = p; input.appendChild(opt); }
+      input.value = cfg.realtime_asr_provider || 'realtime_mock';
+    } else if (type === 'bool') {
+      wrap.className = 'field check';
+      input = document.createElement('input'); input.type = 'checkbox';
+      input.checked = !!cfg[apiKey];
+      title.remove();
+      const tx = document.createElement('span'); tx.textContent = label;
+      wrap.appendChild(input); wrap.appendChild(tx);
+    } else if (type === 'secret') {
+      input = document.createElement('input'); input.type = 'password';
+      input.placeholder = '输入新值更新，留空保持不变';
+      let setFlag = false, badgeTxt = '未设置';
+      if (key === 'asr_api_key') { setFlag = !!cfg.api_key_set; badgeTxt = setFlag ? '已设置' : '未设置'; }
+      else if (key === 'realtime_asr_api_key') {
+        // not directly exposed but we can infer; the server doesn't return *_set for realtime key
+        // fall back to: show "(隐藏)" when active provider is realtime_http with base_url
+        setFlag = false; badgeTxt = '密文';
+      } else if (key === 'access_tokens') { setFlag = (cfg.access_tokens_count || 0) > 0; badgeTxt = setFlag ? `${cfg.access_tokens_count} 个` : '未设置'; }
+      const badge = document.createElement('span');
+      badge.className = 'badge' + (setFlag ? ' set' : '');
+      badge.textContent = badgeTxt;
+      title.appendChild(badge);
+    } else if (type === 'int' || type === 'float') {
+      input = document.createElement('input'); input.type = 'number';
+      if (type === 'float') input.step = '0.1';
+      input.value = cfg[apiKey] != null ? cfg[apiKey] : (cfg[key] != null ? cfg[key] : '');
+    } else {
+      input = document.createElement('input'); input.type = 'text';
+      input.value = cfg[apiKey] != null ? cfg[apiKey] : (cfg[key] != null ? cfg[key] : '');
+    }
+    if (type !== 'bool') wrap.appendChild(input);
+
+    const markDirty = () => { wrap.style.borderLeft = '2px solid var(--accent)'; wrap.style.paddingLeft = '8px'; input.dataset.touched = 'yes'; };
+    input.addEventListener('input', markDirty);
+    input.addEventListener('change', markDirty);
+    form.appendChild(wrap);
+  }
+}
+
+function collectConfigDiff() {
+  const out = {};
+  $$('#configForm label.field').forEach(wrap => {
+    const key = wrap.dataset.key, type = wrap.dataset.type;
+    const input = wrap.querySelector('input, select');
+    if (!input || !input.dataset.touched) return;
+    if (type === 'secret') { const v = input.value; if (v !== '') out[key] = v; return; }
+    if (type === 'bool') { out[key] = input.checked; return; }
+    if (type === 'int') { const n = parseInt(input.value, 10); if (Number.isFinite(n)) out[key] = n; return; }
+    if (type === 'float') { const f = parseFloat(input.value); if (Number.isFinite(f)) out[key] = f; return; }
+    out[key] = input.value;
+  });
+  return out;
+}
+
+$('#saveCfgBtn').addEventListener('click', async () => {
+  const diff = collectConfigDiff();
+  const t = $('#pingStatus');
+  if (Object.keys(diff).length === 0) { t.className = 'toast'; t.textContent = '无改动'; return; }
+  t.className = 'toast'; t.textContent = '保存中…';
+  try {
+    const r = await authedFetch('/asr/config', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(diff),
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `${r.status}`); }
+    const cfg = await r.json(); _currentConfig = cfg; renderConfigForm(cfg);
+    await refreshTopbar();
+    t.className = 'toast ok'; t.textContent = `✓ 已保存 ${Object.keys(diff).length} 项`;
+  } catch (e) { t.className = 'toast err'; t.textContent = '✗ ' + e.message; }
+});
+
+$('#resetCfgBtn').addEventListener('click', async () => {
+  if (!confirm('确认丢弃所有运行时改动，回到 .env 默认？')) return;
+  const t = $('#pingStatus'); t.className = 'toast'; t.textContent = '重置中…';
+  try {
+    const r = await authedFetch('/asr/config/reset', { method: 'POST' });
+    const cfg = await r.json(); _currentConfig = cfg; renderConfigForm(cfg);
+    await refreshTopbar();
+    t.className = 'toast ok'; t.textContent = '✓ 已重置';
+  } catch (e) { t.className = 'toast err'; t.textContent = '✗ ' + e.message; }
+});
+
+$('#pingBtn').addEventListener('click', async () => {
+  const t = $('#pingStatus'); t.className = 'toast'; t.textContent = '测试中 …';
+  $('#pingBtn').disabled = true;
+  try {
+    const r = await authedFetch('/asr/ping', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      t.className = 'toast ok';
+      t.textContent = `✓ ${d.elapsed_ms.toFixed(0)}ms · ${d.model}${d.got_words ? ' · words ✓' : ' · 无时间戳'}`;
+      $('#footStatus').textContent = '✓ 通'; $('#footStatus').className = 'ok';
+    } else {
+      t.className = 'toast err'; t.textContent = `✗ ${d.elapsed_ms.toFixed(0)}ms · ${d.error || 'unknown'}`;
+      $('#footStatus').textContent = '✗'; $('#footStatus').className = 'err';
+    }
+  } catch (e) { t.className = 'toast err'; t.textContent = '✗ ' + e.message; }
+  finally { $('#pingBtn').disabled = false; }
+});
+
+// =================================================================
+//   HISTORY VIEW
+// =================================================================
+async function loadHistory() {
+  const list = $('#histList');
+  list.innerHTML = '<div class="hist-empty">加载中…</div>';
+  try {
+    const r = await authedFetch('/asr/tasks?limit=50');
+    const data = await r.json();
+    $('#histCount').textContent = `${data.total} 个`;
+    if (!data.tasks.length) { list.innerHTML = '<div class="hist-empty">暂无历史任务</div>'; return; }
+    list.innerHTML = data.tasks.map(t => {
+      const statusCls = t.status === 'done' ? 'ok' : t.status === 'failed' ? 'err' : 'warn';
+      return `
+        <div class="hist-item" data-tid="${t.task_id}">
+          <div>
+            <div class="text">${esc(t.text_preview || '(空)')}</div>
+            <div class="tid">${t.task_id}</div>
+          </div>
+          <span class="badge ${statusCls}">${t.status}</span>
+          <span class="meta">${t.finished_segments}/${t.total_segments} 片</span>
+          <span class="meta">${fmtDur(t.duration || 0)}</span>
+        </div>`;
+    }).join('');
+    list.querySelectorAll('.hist-item').forEach(el => el.addEventListener('click', () => loadHistoricalTask(el.dataset.tid)));
+  } catch (e) {
+    list.innerHTML = `<div class="hist-empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+$('#histRefresh').addEventListener('click', loadHistory);
+
+async function loadHistoricalTask(tid) {
+  try {
+    const res = await authedFetch(`/asr/task/${tid}/result`).then(r => r.json());
+    segs.clear();
+    for (const s of (res.segments || [])) segs.set(s.segment_id, {
+      segment_id: s.segment_id, start: s.start, end: s.end,
+      text: s.text, error: s.error, is_final: true, elapsed_ms: s.elapsed_ms || 0,
+    });
+    taskId = tid;
+    $('#taskCard').classList.remove('hidden');
+    $('#taskTid').textContent = tid.slice(0, 16) + '…';
+    $('#totalSeg').textContent = res.segments.length;
+    $('#finSeg').textContent = res.segments.length;
+    $('#progress').style.width = '100%';
+    $('#duration').textContent = fmtDur(res.duration || 0);
+    setTaskStatus(res.status);
+    renderSegs();
+    $('#fullText').value = res.text || '';
+    switchView('tasks');
+  } catch (e) { alert('加载失败: ' + e.message); }
 }
 </script>
 </body>

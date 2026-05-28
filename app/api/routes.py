@@ -20,9 +20,18 @@ from app.config import (
     reset_runtime_overrides,
     update_runtime_overrides,
 )
-from app.models.schemas import TaskInfo, TaskResult, TaskStatus
+from app.models.schemas import (
+    RealtimeAudioChunk,
+    RealtimeSessionCreate,
+    RealtimeSessionInfo,
+    TaskInfo,
+    TaskResult,
+    TaskStatus,
+)
 from app.security import require_token
-from app.services.asr import ASRError, create_provider, list_providers
+from app.services.asr import ASRError, create_provider, list_providers, list_realtime_providers
+from app.services.asr.realtime_base import RealtimeASRError
+from app.services.realtime_manager import RealtimeManager
 from app.services.stream_manager import TaskManager
 from app.services.subtitles import to_srt, to_vtt
 
@@ -33,6 +42,10 @@ meta_router = APIRouter(tags=["meta"])
 
 def get_manager(request: Request) -> TaskManager:
     return request.app.state.manager
+
+
+def get_realtime_manager(request: Request) -> RealtimeManager:
+    return request.app.state.realtime_manager
 
 
 ALLOWED_EXTS = {
@@ -269,6 +282,59 @@ async def ping_upstream() -> dict:
         tmp.unlink(missing_ok=True)
 
 
+@router.get("/tasks")
+async def list_tasks(
+    manager: TaskManager = Depends(get_manager),
+    limit: int = 50,
+) -> dict:
+    """List completed tasks (from outputs/ + in-memory active ones)."""
+    s = get_settings()
+    seen: set[str] = set()
+    items: list[dict] = []
+
+    # In-memory tasks (active + recently completed)
+    for tid, t in list(manager._tasks.items()):  # noqa: SLF001
+        seen.add(tid)
+        items.append({
+            "task_id": tid,
+            "status": t.info.status.value,
+            "progress": t.info.progress,
+            "total_segments": t.info.total_segments,
+            "finished_segments": t.info.finished_segments,
+            "duration": t.result.duration,
+            "text_preview": (t.result.text or "")[:120],
+            "error": t.info.error,
+            "in_memory": True,
+        })
+
+    # Persisted task results
+    out_dir = s.output_dir
+    if out_dir.is_dir():
+        import json as _json
+        for path in sorted(out_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            tid = path.stem
+            if tid in seen:
+                continue
+            try:
+                data = _json.loads(path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            items.append({
+                "task_id": tid,
+                "status": data.get("status", "done"),
+                "progress": 1.0,
+                "total_segments": len(data.get("segments", [])),
+                "finished_segments": len(data.get("segments", [])),
+                "duration": data.get("duration", 0.0),
+                "text_preview": (data.get("text") or "")[:120],
+                "error": data.get("error"),
+                "in_memory": False,
+                "mtime": path.stat().st_mtime,
+            })
+
+    return {"tasks": items[:limit], "total": len(items)}
+
+
 @router.get("/task/{task_id}/segments/{segment_id}/raw")
 async def get_segment_raw(
     task_id: str, segment_id: int,
@@ -288,3 +354,99 @@ async def get_segment_raw(
                 "error": seg.error,
             }
     raise HTTPException(404, "segment not found")
+
+
+# -------------------- Realtime --------------------
+
+@router.post("/realtime/session", response_model=RealtimeSessionInfo)
+async def create_realtime_session(
+    config: RealtimeSessionCreate,
+    rm: RealtimeManager = Depends(get_realtime_manager),
+) -> RealtimeSessionInfo:
+    try:
+        return await rm.create(config)
+    except RealtimeASRError as e:
+        raise HTTPException(503, str(e))
+
+
+@router.get("/realtime/sessions")
+async def list_realtime_sessions(
+    rm: RealtimeManager = Depends(get_realtime_manager),
+) -> dict:
+    return {
+        "sessions": [s.model_dump() for s in rm.list()],
+        "providers": list_realtime_providers(),
+        "active_provider": get_settings().realtime_asr_provider,
+    }
+
+
+@router.get("/realtime/{session_id}", response_model=RealtimeSessionInfo)
+async def get_realtime_session(
+    session_id: str,
+    rm: RealtimeManager = Depends(get_realtime_manager),
+) -> RealtimeSessionInfo:
+    info = rm.get(session_id)
+    if info is None:
+        raise HTTPException(404, "session not found")
+    return info
+
+
+@router.post("/realtime/{session_id}/audio")
+async def push_realtime_audio(
+    session_id: str,
+    chunk: RealtimeAudioChunk,
+    rm: RealtimeManager = Depends(get_realtime_manager),
+) -> dict:
+    try:
+        await rm.push_audio(session_id, chunk)
+    except KeyError:
+        raise HTTPException(404, "session not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RealtimeASRError as e:
+        raise HTTPException(502, str(e))
+    return {"ok": True, "seq": chunk.seq}
+
+
+@router.get("/realtime/{session_id}/events")
+async def stream_realtime_session(
+    session_id: str,
+    rm: RealtimeManager = Depends(get_realtime_manager),
+) -> EventSourceResponse:
+    if rm.get(session_id) is None:
+        raise HTTPException(404, "session not found")
+
+    async def event_gen():
+        async for evt in rm.stream(session_id):
+            yield {"event": evt.type, "data": evt.model_dump_json()}
+        info = rm.get(session_id)
+        if info is not None and info.status.value not in {"done", "failed", "closed"}:
+            # safety fallback if the stream ended without a terminal event
+            from app.models.schemas import RealtimeASREvent
+            terminal = RealtimeASREvent(type="done", session_id=session_id, is_final=True)
+            yield {"event": "done", "data": terminal.model_dump_json()}
+
+    return EventSourceResponse(event_gen())
+
+
+@router.post("/realtime/{session_id}/end")
+async def end_realtime_session(
+    session_id: str,
+    rm: RealtimeManager = Depends(get_realtime_manager),
+) -> dict:
+    try:
+        await rm.finish(session_id)
+    except KeyError:
+        raise HTTPException(404, "session not found")
+    return {"ok": True}
+
+
+@router.delete("/realtime/{session_id}")
+async def delete_realtime_session(
+    session_id: str,
+    rm: RealtimeManager = Depends(get_realtime_manager),
+) -> dict:
+    removed = await rm.close(session_id)
+    if not removed:
+        raise HTTPException(404, "session not found")
+    return {"ok": True}
