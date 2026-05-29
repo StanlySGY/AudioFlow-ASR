@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import meta_router, router as asr_router
@@ -14,6 +15,24 @@ from app.services.stream_manager import TaskManager
 
 
 WEB_DIR = Path(__file__).parent / "web"
+
+# Shown at "/" when the built frontend is absent (e.g. running the backend
+# directly without `npm run build`; in Docker the multi-stage build always
+# populates app/web, so the SPA is served instead).
+_NO_UI_HTML = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>AudioFlow-ASR</title><style>
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f3f5f9;
+color:#1c2330;display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center}
+.box{background:#fff;border:1px solid #e6e9f0;border-radius:16px;padding:40px 44px;max-width:520px;
+box-shadow:0 4px 24px rgba(20,30,60,.06)}h1{font-size:18px;margin:0 0 12px}p{color:#4a5263;line-height:1.7;font-size:14px}
+code{background:#eef1f6;padding:2px 7px;border-radius:5px;font-family:ui-monospace,monospace;font-size:13px}
+a{color:#2f6bff;text-decoration:none}</style></head><body><div class="box">
+<h1>🎙 AudioFlow-ASR 已启动</h1>
+<p>后端接口正常运行，但前端界面尚未构建。</p>
+<p>推荐用 Docker 一键部署（镜像会自动构建前端）：<br><code>./build.sh &amp;&amp; docker compose up -d</code></p>
+<p>本地开发可在 <code>frontend/</code> 下执行 <code>npm install &amp;&amp; npm run build</code>，或 <code>npm run dev</code> 启动热重载。</p>
+<p>接口文档：<a href="/docs">/docs</a></p>
+</div></body></html>"""
 
 
 @asynccontextmanager
@@ -52,8 +71,13 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    if WEB_DIR.is_dir():
+    if (WEB_DIR / "index.html").is_file():
         app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    else:
+        # Fallback root so the app is usable (and testable) without a built frontend.
+        @app.get("/", response_class=HTMLResponse)
+        async def _root() -> str:
+            return _NO_UI_HTML
 
     return app
 
