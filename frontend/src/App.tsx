@@ -31,8 +31,8 @@ export default function App() {
   
   // Views Router State
   const [currentView, setCurrentView] = useState<string>('tasks');
-  const [viewTitle, setViewTitle] = useState('文件转写任务');
-  const [viewCrumb, setViewCrumb] = useState('上传音频/视频文件 → FFmpeg标准化格式 → 多分片异步并发ASR → 去重凭借输出完整文本与SRT/VTT字幕');
+  const [viewTitle, setViewTitle] = useState('文件转写');
+  const [viewCrumb, setViewCrumb] = useState('上传音频或视频，自动切分识别，导出完整文本与字幕');
 
   // Topbar / Footer connection info
   const [config, setConfig] = useState<SystemConfig | null>(null);
@@ -116,10 +116,10 @@ export default function App() {
   const handleViewChange = (view: string) => {
     setCurrentView(view);
     const routerMeta: { [key: string]: { title: string; crumb: string } } = {
-      tasks: { title: '文件转写任务', crumb: '上传音频/视频文件 → FFmpeg标准化格式 → 多分片异步并发ASR → 去重凭借输出完整文本与SRT/VTT字幕' },
-      realtime: { title: '实时流式识别', crumb: '创建活跃识别会话 → 客户端音频切包 Base64 上行 → SSE流事件扇出下行 → 准实时极低延迟推送结果' },
-      config: { title: '服务配置管理', crumb: '在线修改系统环境变量项 → 即时写入配置文件免重启生效 → 一键重置、上游健康连通性探查' },
-      history: { title: '历史任务归档', crumb: '查询或从 outputs/ 目录加载已持久化的所有历史切分转写任务' },
+      tasks: { title: '文件转写', crumb: '上传音频或视频，自动切分识别，导出完整文本与字幕' },
+      realtime: { title: '实时识别', crumb: '创建会话后边发音频边出结果，适合直播、会议等实时场景' },
+      config: { title: '服务配置', crumb: '填写并测试 ASR 接口，所有修改即时生效、无需重启' },
+      history: { title: '历史记录', crumb: '查看以往已完成的转写任务，点击可重新打开' },
     };
     
     if (routerMeta[view]) {
@@ -297,10 +297,10 @@ export default function App() {
       setFullText(res.text || '');
       
       setCurrentView('tasks');
-      setViewTitle('文件转写任务');
-      setViewCrumb('上传音频/视频文件 → FFmpeg标准化格式 → 多分片异步并发ASR → 去重凭借输出完整文本与SRT/VTT字幕');
+      setViewTitle('文件转写');
+      setViewCrumb('上传音频或视频，自动切分识别，导出完整文本与字幕');
     } catch (e: any) {
-      alert('加载归档记录失败: ' + e.message);
+      alert('加载历史记录失败: ' + e.message);
     }
   };
 
@@ -311,6 +311,14 @@ export default function App() {
     const sec = Math.floor(s % 60);
     return h ? `${h}h${m}m` : `${m}m${sec}s`;
   };
+
+  const STATUS_LABEL: { [k: string]: string } = {
+    'uploading': '上传中', 'pending': '排队中', 'preprocessing': '预处理',
+    'splitting': '切分中', 'transcribing': '识别中', 'merging': '合并中',
+    'done': '已完成', 'failed': '失败', '—': '—',
+  };
+  const statusLabel = (s: string) => STATUS_LABEL[s] || s;
+  const isReady = !!(config && config.api_key_set) || footStatus.status === 'ok';
 
   const downloadFile = (name: string, content: string, type: string) => {
     const blob = new Blob([content], { type });
@@ -365,9 +373,9 @@ export default function App() {
           onSetToken={handleSetToken}
         />
 
-        <div className="content p-8 max-w-7xl w-full mx-auto flex-1">
+        <div className="content p-7 max-w-6xl w-full mx-auto flex-1">
           <AnimatePresence mode="wait">
-            
+
             {/* 1. TASKS ROUTE */}
             {currentView === 'tasks' && (
               <motion.div
@@ -377,32 +385,71 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="flex flex-col gap-6"
               >
+                {/* Beginner step guide */}
+                {!taskId && (
+                  <div className="card p-6">
+                    <h3 className="section-title mb-1">
+                      <span className="text-accent">快速上手</span>
+                      <span className="section-sub">第一次使用？按下面三步来</span>
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                      <div className="step" style={{ borderColor: isReady ? 'var(--color-ok)' : 'var(--color-accent)' }}>
+                        <span className="num" style={{ background: isReady ? 'var(--color-ok-soft)' : 'var(--color-accent-soft)', color: isReady ? 'var(--color-ok)' : 'var(--color-accent)' }}>
+                          {isReady ? '✓' : '1'}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-semibold text-fg">配置 ASR 接口</div>
+                          <div className="text-[11.5px] text-muted mt-0.5">填写接口地址、密钥、模型</div>
+                          {!isReady && (
+                            <button onClick={() => handleViewChange('config')} className="primary mt-2 text-[12px] py-1.5 px-3">去配置</button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="step border-border">
+                        <span className="num bg-surface-3 text-fg-dim">2</span>
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-semibold text-fg">测试连接</div>
+                          <div className="text-[11.5px] text-muted mt-0.5">在「服务配置」点「测试连接」确认上游可用</div>
+                        </div>
+                      </div>
+                      <div className="step border-border">
+                        <span className="num bg-surface-3 text-fg-dim">3</span>
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-semibold text-fg">上传音频</div>
+                          <div className="text-[11.5px] text-muted mt-0.5">把文件拖到下方，等待自动转写完成</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Upload drag drop panel */}
-                <div className="border border-white/5 bg-white/2 rounded-2xl p-6 backdrop-blur-md">
+                <div className="card p-6">
                   <Dropzone onFileSelect={handleFileSelect} disabled={taskStatus === 'uploading' || taskStatus === 'processing'} />
-                  
+
                   {/* Parameter Accordion Overrides */}
-                  <Accordion title="⚙ 仅对本次转写任务覆盖选项 (参数留空将使用服务器默认值)">
+                  <div className="mt-4">
+                  <Accordion title="高级选项 · 仅对本次转写生效（留空则用服务端默认值）">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-5">
                       <label className="field">
-                        <span>Model</span>
+                        <span>模型名称</span>
                         <input type="text" value={ovModel} onChange={e=>setOvModel(e.target.value)} placeholder="qwen3-asr-flash" />
                       </label>
                       <label className="field">
-                        <span>Language</span>
-                        <input type="text" value={ovLanguage} onChange={e=>setOvLanguage(e.target.value)} placeholder="zh / en / auto" />
+                        <span>识别语言</span>
+                        <input type="text" value={ovLanguage} onChange={e=>setOvLanguage(e.target.value)} placeholder="zh / en / 留空自动" />
                       </label>
                       <label className="field">
-                        <span>Split strategy</span>
+                        <span>切分策略</span>
                         <select value={ovSplit} onChange={e=>setOvSplit(e.target.value)}>
-                          <option value="">(默认)</option>
-                          <option value="fixed">fixed</option>
-                          <option value="silence">silence</option>
-                          <option value="overlap">overlap</option>
+                          <option value="">默认</option>
+                          <option value="fixed">fixed（固定时长）</option>
+                          <option value="silence">silence（按静音）</option>
+                          <option value="overlap">overlap（重叠切分）</option>
                         </select>
                       </label>
                       <label className="field">
-                        <span>Chunk seconds</span>
+                        <span>每片时长（秒）</span>
                         <input type="number" value={ovChunk} onChange={e=>setOvChunk(e.target.value)} placeholder="30" min="5" step="5" />
                       </label>
                       <label className="field">
@@ -410,14 +457,18 @@ export default function App() {
                         <input type="number" value={ovOverlap} onChange={e=>setOvOverlap(e.target.value)} placeholder="2" min="0" step="0.5" />
                       </label>
                       <label className="field">
-                        <span>Hotwords</span>
-                        <input type="text" value={ovHotwords} onChange={e=>setOvHotwords(e.target.value)} placeholder="逗号分隔" />
+                        <span>重叠时长（秒）</span>
+                        <input type="number" value={ovOverlap} onChange={e=>setOvOverlap(e.target.value)} placeholder="2" min="0" step="0.5" />
                       </label>
                       <label className="field">
-                        <span>Prompt hints</span>
-                        <input type="text" value={ovHints} onChange={e=>setOvHints(e.target.value)} placeholder="自由文本上下文提示" />
+                        <span>热词</span>
+                        <input type="text" value={ovHotwords} onChange={e=>setOvHotwords(e.target.value)} placeholder="逗号分隔的专有名词" />
                       </label>
-                      
+                      <label className="field">
+                        <span>上下文提示</span>
+                        <input type="text" value={ovHints} onChange={e=>setOvHints(e.target.value)} placeholder="告诉模型这段音频的背景" />
+                      </label>
+
                       <label className="field check">
                         <input
                           type="checkbox"
@@ -427,10 +478,11 @@ export default function App() {
                             setOvTimestampsTouched(true);
                           }}
                         />
-                        <span>请求 Word 级别时间戳</span>
+                        <span>请求逐字时间戳（字幕更精准）</span>
                       </label>
                     </div>
                   </Accordion>
+                  </div>
                 </div>
 
                 {/* Active progress tracking cards panel */}
@@ -438,49 +490,49 @@ export default function App() {
                   <motion.div
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="border border-white/5 bg-white/2 rounded-2xl p-6 backdrop-blur-md"
+                    className="card p-6"
                   >
-                    <h3 className="font-title text-base font-bold text-white flex items-center justify-between mb-4">
+                    <h3 className="section-title justify-between mb-4">
                       <div className="flex items-center gap-2">
-                        <span>任务转写中</span>
-                        <span className="font-mono text-xs text-gray-500">#{taskId.slice(0, 16)}…</span>
+                        <span>转写进度</span>
+                        <span className="font-mono text-xs text-muted">#{taskId.slice(0, 16)}…</span>
                       </div>
-                      
+
                       <span className={`badge ${taskStatus === 'done' ? 'ok' : taskStatus === 'failed' ? 'err' : 'warn'}`}>
                         <span className="dot pulse" />
-                        <span>{taskStatus}</span>
+                        <span>{statusLabel(taskStatus)}</span>
                       </span>
                     </h3>
 
                     {/* Stats details bar */}
                     <div className="row gap-4 mb-6 items-center flex-wrap">
-                      <span className="badge">分片切分: <b className="text-white ml-1 font-mono">{taskFinSegs}/{taskTotalSegs}</b></span>
-                      <span className="badge">时长总计: <b className="text-white ml-1 font-mono">{taskDuration}</b></span>
-                      
+                      <span className="badge">已识别分片 <b className="text-fg ml-1 font-mono">{taskFinSegs}/{taskTotalSegs}</b></span>
+                      <span className="badge">音频时长 <b className="text-fg ml-1 font-mono">{taskDuration}</b></span>
+
                       <div className="bar flex-1 min-w-[200px]">
                         <div style={{ width: `${taskProgress * 100}%` }} />
                       </div>
 
                       <button onClick={resetTask}>
                         <Trash2 className="w-3.5 h-3.5" />
-                        <span>释放面板</span>
+                        <span>清空</span>
                       </button>
                     </div>
 
                     {/* Segmented pane controllers */}
                     <div className="tabs-container">
-                      <div 
-                        onClick={() => setActivePane('live')} 
+                      <div
+                        onClick={() => setActivePane('live')}
                         className={`tab ${activePane === 'live' ? 'active' : ''}`}
                       >
-                        实时分片 ({segments.length})
+                        分片明细 ({segments.length})
                       </div>
-                      
-                      <div 
-                        onClick={() => setActivePane('final')} 
+
+                      <div
+                        onClick={() => setActivePane('final')}
                         className={`tab ${activePane === 'final' ? 'active' : ''}`}
                       >
-                        完整合并文本
+                        完整文本
                       </div>
                     </div>
 
@@ -490,10 +542,10 @@ export default function App() {
                         <div className="pane">
                           <SegmentList segments={segments} taskId={taskId} authedFetch={authedFetch} />
                           {segments.length === 0 && (
-                            <div className="empty flex flex-col items-center justify-center py-14">
-                              <span className="ico text-3xl animate-bounce">⌛</span>
-                              <p className="text-gray-500 text-xs font-mono mt-3">
-                                等待 FFmpeg 预分切与流式并发接收通知...
+                            <div className="empty flex flex-col items-center justify-center py-14 border border-dashed border-border rounded-xl">
+                              <span className="ico text-3xl">⏳</span>
+                              <p className="text-muted text-xs mt-3">
+                                正在切分音频，马上开始逐片识别…
                               </p>
                             </div>
                           )}
@@ -503,8 +555,8 @@ export default function App() {
                           <textarea
                             value={fullText}
                             readOnly
-                            placeholder="音频流拼接中，完成后在此显示全部识别内容…"
-                            className="w-full min-h-[300px] border border-white/5 bg-black/20 p-5 rounded-xl font-mono text-sm leading-relaxed text-gray-200"
+                            placeholder="识别完成后，这里会显示拼接好的完整文本…"
+                            className="w-full min-h-[300px] border border-border bg-surface-2 p-5 rounded-xl text-sm leading-relaxed text-fg"
                           />
                           
                           <div className="flex gap-2.5 flex-wrap">

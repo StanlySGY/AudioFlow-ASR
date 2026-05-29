@@ -23,7 +23,7 @@ export const RealtimeView: React.FC<RealtimeViewProps> = ({
   // Session State
   const [session, setSession] = useState<RealtimeSession | null>(null);
   const [rtStatus, setRtStatus] = useState<string>('未创建');
-  const [toastClass, setToastClass] = useState<string>('text-gray-500 bg-white/2 border-white/5');
+  const [toastClass, setToastClass] = useState<string>('');
   const [events, setEvents] = useState<RealtimeEvent[]>([]);
   const [rtEventCount, setRtEventCount] = useState(0);
 
@@ -67,7 +67,7 @@ export const RealtimeView: React.FC<RealtimeViewProps> = ({
     };
 
     setRtStatus('创建中…');
-    setToastClass('text-yellow-400 bg-yellow-400/5 border-yellow-400/10');
+    setToastClass('warn');
 
     try {
       const r = await authedFetch('/asr/realtime/session', {
@@ -97,13 +97,13 @@ export const RealtimeView: React.FC<RealtimeViewProps> = ({
       setEvents([]);
       
       setRtStatus(`✓ 会话 ${data.session_id.slice(0, 8)}…`);
-      setToastClass('text-[#10b981] bg-[#10b981]/5 border-[#10b981]/10 drop-shadow-[0_0_10px_rgba(16,185,129,0.15)]');
+      setToastClass('ok');
 
       // Subscribe to SSE
       subscribeToSessionEvents(data.session_id);
     } catch (e: any) {
       setRtStatus(`✗ 创建失败: ${e.message}`);
-      setToastClass('text-[#ef4444] bg-[#ef4444]/5 border-[#ef4444]/10');
+      setToastClass('err');
       setSession(null);
     }
   };
@@ -259,47 +259,51 @@ export const RealtimeView: React.FC<RealtimeViewProps> = ({
 
     setSession(null);
     setRtStatus('已删除');
-    setToastClass('text-gray-500 bg-white/2 border-white/5');
+    setToastClass('');
   };
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Intro hint */}
+      <div className="panel p-4 flex items-start gap-3">
+        <Info className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+        <p className="hint">
+          实时识别用于「边说边出字」的场景：先<b className="text-fg">创建会话</b>，再把音频按小包不断上传，服务会通过事件流实时返回识别结果。
+          下方提供了一个<b className="text-fg">本地文件模拟器</b>，选一个音频文件即可体验完整流程（默认走 realtime_mock 演示数据，接真实模型请在「服务配置」里设置）。
+        </p>
+      </div>
+
       {/* Session Create Box */}
-      <div className="border border-white/5 bg-white/2 rounded-2xl p-6 backdrop-blur-md">
-        <h3 className="font-title text-base font-bold text-white flex items-center gap-2 mb-4">
-          <Mic className="w-5 h-5 text-[#5c54f2]" />
-          <span>新建流式识别会话</span>
-          <span className="text-xs text-gray-500 font-normal ml-1">Realtime ASR · base64 / SSE</span>
+      <div className="card p-6">
+        <h3 className="section-title mb-1">
+          <Mic className="w-5 h-5 text-accent" />
+          <span>第一步 · 创建会话</span>
         </h3>
-        
+        <p className="hint mb-4">不确定就用默认值，直接点「创建会话」即可。</p>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <label className="field">
-            <span>Language</span>
-            <input type="text" value={language} onChange={e=>setLanguage(e.target.value)} placeholder="zh / en / auto" />
+            <span>识别语言</span>
+            <input type="text" value={language} onChange={e=>setLanguage(e.target.value)} placeholder="zh / en / 留空自动" />
           </label>
-          
           <label className="field">
-            <span>Sample rate (Hz)</span>
+            <span>采样率 (Hz)</span>
             <input type="number" value={sampleRate} onChange={e=>setSampleRate(parseInt(e.target.value, 10))} />
           </label>
-
           <label className="field">
-            <span>Format</span>
+            <span>音频格式</span>
             <input type="text" value={format} onChange={e=>setFormat(e.target.value)} />
           </label>
-
           <label className="field">
-            <span>Channels</span>
+            <span>声道数</span>
             <input type="number" value={channels} onChange={e=>setChannels(parseInt(e.target.value, 10))} />
           </label>
-
           <label className="field">
-            <span>Mode</span>
+            <span>识别模式</span>
             <input type="text" value={mode} onChange={e=>setMode(e.target.value)} placeholder="2pass / online" />
           </label>
-
           <label className="field">
-            <span>Hotwords</span>
+            <span>热词（可选）</span>
             <input type="text" value={hotwords} onChange={e=>setHotwords(e.target.value)} placeholder="逗号分隔" />
           </label>
         </div>
@@ -307,12 +311,9 @@ export const RealtimeView: React.FC<RealtimeViewProps> = ({
         <div className="flex items-center gap-4 mt-6 flex-wrap">
           <button onClick={handleCreateSession} className="primary">
             <Play className="w-4 h-4" />
-            <span>创建识别会话</span>
+            <span>创建会话</span>
           </button>
-          
-          <span className={`toast ${toastClass}`}>
-            {rtStatus}
-          </span>
+          <span className={`toast ${toastClass}`}>{rtStatus}</span>
         </div>
       </div>
 
@@ -321,57 +322,52 @@ export const RealtimeView: React.FC<RealtimeViewProps> = ({
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="border border-white/5 bg-white/2 rounded-2xl p-6 backdrop-blur-md"
+          className="card p-6"
         >
-          <h3 className="font-title text-base font-bold text-white flex items-center justify-between mb-4">
+          <h3 className="section-title justify-between mb-4">
             <div className="flex items-center gap-2">
-              <span>活动会话监控</span>
-              <span className="font-mono text-xs text-gray-500">#{session.session_id.slice(0, 16)}…</span>
+              <span>第二步 · 发送音频并查看结果</span>
+              <span className="font-mono text-xs text-muted">#{session.session_id.slice(0, 16)}…</span>
             </div>
-            
             <span className="badge ok">
               <span className="dot pulse" />
-              <span>Session Connected</span>
+              <span>会话进行中</span>
             </span>
           </h3>
 
           <div className="flex gap-3 mb-4">
-            <span className="badge">已发送包: <b className="text-white ml-1 font-mono">{fedChunks}</b></span>
-            <span className="badge">字节大小: <b className="text-white ml-1 font-mono">{fedBytes.toLocaleString()}</b> B</span>
+            <span className="badge">已发送 <b className="text-fg ml-1 font-mono">{fedChunks}</b> 包</span>
+            <span className="badge">累计 <b className="text-fg ml-1 font-mono">{fedBytes.toLocaleString()}</b> 字节</span>
           </div>
 
-          {/* Glowing Bouncing Soundwave visualizer */}
+          {/* Soundwave visualizer */}
           <div className={`soundwave-container ${isFeeding ? 'active' : ''}`}>
-            {Array.from({ length: 12 }).map((_, idx) => (
-              <div key={idx} className="bar" />
-            ))}
+            {Array.from({ length: 12 }).map((_, idx) => <div key={idx} className="bar" />)}
           </div>
 
-          {/* Interactive Chunk Feeder controls */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 p-4 rounded-xl bg-black/20 border border-white/3">
+          {/* Chunk Feeder controls */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 p-4 rounded-xl panel">
             <label className="field col-span-1 md:col-span-2">
               <span className="flex items-center gap-1">
-                <Info className="w-3.5 h-3.5 text-[#5c54f2]" />
-                <span>流式喂入模拟源（请选择一个本地的音频或视频文件）</span>
+                <Info className="w-3.5 h-3.5 text-accent" />
+                <span>选择一个本地音频/视频文件用于模拟发送</span>
               </span>
-              <input type="file" ref={fileInputRef} accept="audio/*,video/*" className="file:bg-[#5c54f2]/10 file:border-none file:text-[#5c54f2] file:px-4 file:py-1 file:rounded-md file:cursor-pointer" />
+              <input type="file" ref={fileInputRef} accept="audio/*,video/*"
+                className="file:bg-accent-soft file:border-none file:text-accent file:px-4 file:py-1 file:rounded-md file:cursor-pointer file:mr-3" />
             </label>
-
             <label className="field">
-              <span>分包大小 (KB)</span>
+              <span>每包大小 (KB)</span>
               <input type="number" value={chunkKB} onChange={e=>setChunkKB(parseInt(e.target.value,10)||1)} />
             </label>
-
             <label className="field">
-              <span>发送毫秒间隔 (ms)</span>
+              <span>发送间隔 (毫秒)</span>
               <input type="number" value={intervalMs} onChange={e=>setIntervalMs(parseInt(e.target.value,10)||0)} />
             </label>
-
             <label className="field col-span-1 md:col-span-2">
-              <span>手动输入单包 Base64 字符串 (可选)</span>
+              <span>手动发送单个 Base64 数据包（高级，可选）</span>
               <div className="flex gap-2">
-                <input type="text" value={manualBase64} onChange={e=>setManualBase64(e.target.value)} placeholder="粘贴 base64 音频段…" className="flex-1" />
-                <button onClick={handleSendManual} className="px-4">发送单包</button>
+                <input type="text" value={manualBase64} onChange={e=>setManualBase64(e.target.value)} placeholder="粘贴 base64 音频片段…" className="flex-1" />
+                <button onClick={handleSendManual} className="px-4 shrink-0">发送</button>
               </div>
             </label>
           </div>
@@ -379,36 +375,33 @@ export const RealtimeView: React.FC<RealtimeViewProps> = ({
           <div className="flex items-center gap-2 mt-5 flex-wrap">
             <button onClick={handleStartFeeding} disabled={isFeeding} className="primary">
               <Play className="w-4 h-4" />
-              <span>开始模拟发送</span>
+              <span>开始发送</span>
             </button>
-            
             <button onClick={() => { feedingRef.current = false; setIsFeeding(false); }} disabled={!isFeeding}>
               <Square className="w-4 h-4" />
-              <span>停止模拟</span>
+              <span>停止</span>
             </button>
-
-            <button onClick={handleSendEnd} title="主动发送 Empty Chunk + is_final=true 告诉上游终止">
-              发送 End 信号
+            <button onClick={handleSendEnd} title="发送结束信号，通知上游本次音频已结束">
+              发送结束信号
             </button>
-
             <button onClick={handleDeleteSession} className="danger ml-auto">
               <Trash2 className="w-4 h-4" />
-              <span>断开并注销会话</span>
+              <span>关闭会话</span>
             </button>
           </div>
 
-          {/* SSE Logs Output Console */}
+          {/* SSE Logs Console */}
           <div className="mt-8">
-            <h4 className="font-title text-sm font-bold text-white flex items-center gap-2 mb-3">
-              <Terminal className="w-4 h-4 text-[#8b5cf6]" />
-              <span>流式解析事件流 (EventSource)</span>
-              <span className="badge text-[10px]">{rtEventCount} 个事件</span>
+            <h4 className="section-title text-sm mb-3">
+              <Terminal className="w-4 h-4 text-accent-2" />
+              <span>实时结果（事件流）</span>
+              <span className="badge text-[10px]">{rtEventCount} 条</span>
             </h4>
-            
+
             <div ref={logRef} className="evlog">
               {events.length === 0 ? (
-                <div className="text-gray-600 text-center py-10 font-mono text-xs">
-                  [CONSOLE IDLE] 等待音频数据包流式喂入与上游事件解析通知...
+                <div className="text-[#56627d] text-center py-10 font-mono text-xs">
+                  等待音频发送，识别结果会实时显示在这里…
                 </div>
               ) : (
                 events.map((ev, idx) => {
@@ -417,14 +410,14 @@ export const RealtimeView: React.FC<RealtimeViewProps> = ({
                     ev.seq !== undefined ? `seq=${ev.seq}` : '',
                     ev.elapsed_ms !== undefined ? `${ev.elapsed_ms.toFixed(0)}ms` : '',
                   ].filter(Boolean).join(' ');
-
+                  const tyText = { online: '识别中', final: '最终', done: '结束', error: '错误' }[ev.type] || ev.type;
                   return (
                     <div key={idx} className="ev font-mono">
                       <span className="ts">{ts}</span>
-                      <span className={`ty ${ev.type}`}>{ev.type}</span>
-                      {meta && <span className="text-gray-500 text-[10px] font-semibold">[{meta}]</span>}
-                      <span className="text-gray-300 ml-1">
-                        {ev.error ? <span className="text-[#ef4444]">{ev.error}</span> : ev.text || '…'}
+                      <span className={`ty ${ev.type}`}>{tyText}</span>
+                      {meta && <span className="text-[#56627d] text-[10px] font-semibold">[{meta}]</span>}
+                      <span className="ev-text">
+                        {ev.error ? <span className="text-[#ff9b96]">{ev.error}</span> : ev.text || '…'}
                       </span>
                     </div>
                   );

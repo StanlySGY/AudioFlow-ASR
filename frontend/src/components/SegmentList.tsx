@@ -77,7 +77,7 @@ export const SegmentList: React.FC<SegmentListProps> = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-              className="border border-white/5 rounded-xl bg-white/2 hover:bg-[#5c54f2]/3 hover:border-[#5c54f2]/20 transition-colors overflow-hidden"
+              className="border border-border rounded-xl bg-white hover:border-accent/30 hover:bg-accent-soft/40 transition-colors overflow-hidden"
             >
               {/* Main content row */}
               <div
@@ -86,17 +86,17 @@ export const SegmentList: React.FC<SegmentListProps> = ({
               >
                 {/* ID and Status badge */}
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="font-mono text-xs font-bold text-[#5c54f2]">
+                  <span className="font-mono text-xs font-bold text-accent">
                     #{seg.segment_id}
                   </span>
-                  
-                  <span className="flex items-center gap-1 text-[11px] font-mono font-medium px-2.5 py-1 rounded-full bg-white/4 border border-white/5 text-gray-300">
-                    <Clock className="w-3 h-3 text-[#8b5cf6]" />
+
+                  <span className="flex items-center gap-1 text-[11px] font-mono font-medium px-2.5 py-1 rounded-full bg-surface-3 border border-border text-fg-dim">
+                    <Clock className="w-3 h-3 text-accent-2" />
                     <span>{formatTime(seg.start)} – {formatTime(seg.end)}</span>
                   </span>
-                  
-                  <span className="flex items-center gap-1 text-[11px] font-mono font-medium px-2.5 py-1 rounded-full bg-white/4 border border-white/5 text-gray-400">
-                    <Timer className="w-3 h-3 text-gray-500" />
+
+                  <span className="flex items-center gap-1 text-[11px] font-mono font-medium px-2.5 py-1 rounded-full bg-surface-3 border border-border text-muted">
+                    <Timer className="w-3 h-3 text-muted" />
                     <span>{elapsed}</span>
                   </span>
                 </div>
@@ -104,18 +104,18 @@ export const SegmentList: React.FC<SegmentListProps> = ({
                 {/* Text content */}
                 <div className="flex-1 min-w-0">
                   {seg.error ? (
-                    <div className="flex items-center gap-1.5 text-[#ef4444] text-[13px] font-medium">
+                    <div className="flex items-center gap-1.5 text-err text-[13px] font-medium">
                       <AlertTriangle className="w-3.5 h-3.5" />
                       <span>{seg.error}</span>
                     </div>
                   ) : (
-                    <p className="text-[13.5px] leading-relaxed text-gray-200 truncate">
-                      {seg.text || '正在转写…'}
+                    <p className="text-[13.5px] leading-relaxed text-fg truncate">
+                      {seg.text || '识别中…'}
                     </p>
                   )}
                 </div>
 
-                <div className="shrink-0 text-gray-500 md:opacity-0 hover:opacity-100 group-hover:opacity-100 transition-opacity">
+                <div className="shrink-0 text-muted">
                   <Eye className="w-4 h-4" />
                 </div>
               </div>
@@ -129,19 +129,19 @@ export const SegmentList: React.FC<SegmentListProps> = ({
                     exit={{ height: 0 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <div className="border-t border-white/5 bg-[#05070e] p-5 shadow-inner">
+                    <div className="border-t border-border bg-[#0e1626] p-5">
                       <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500 font-mono">
-                          Raw JSON Response payload
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-[#6b7790] font-mono">
+                          ASR 接口原始返回（调试用）
                         </span>
                       </div>
-                      
+
                       {isLoading ? (
-                        <div className="text-xs font-mono text-[#5c54f2] animate-pulse">
-                          正在加载上游响应数据…
+                        <div className="text-xs font-mono text-[#9cc0ff] animate-pulse">
+                          正在加载上游返回数据…
                         </div>
                       ) : (
-                        <pre className="text-[11px] font-mono text-[#a5b4fc] overflow-auto max-h-[300px] leading-relaxed">
+                        <pre className="text-[11px] font-mono text-[#9cc0ff] overflow-auto max-h-[300px] leading-relaxed">
                           {rawData[seg.segment_id] || '无返回数据'}
                         </pre>
                       )}

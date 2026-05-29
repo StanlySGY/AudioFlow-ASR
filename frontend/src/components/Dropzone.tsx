@@ -64,17 +64,17 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onFileSelect, disabled }) =>
         onDragLeave={handleDrag}
         onDrop={handleDrop}
         onClick={handleClick}
-        className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-4 ${
+        className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-4 ${
           isDragActive
-            ? 'border-[#5c54f2] bg-[#5c54f2]/8 shadow-lg shadow-[#5c54f2]/5 text-white'
-            : 'border-white/10 bg-white/2 hover:border-[#5c54f2]/30 hover:bg-[#5c54f2]/3 hover:shadow-lg hover:shadow-[#5c54f2]/2 hover:text-white text-gray-400'
+            ? 'border-accent bg-accent-soft text-accent'
+            : 'border-border-strong bg-surface-2 hover:border-accent/50 hover:bg-accent-soft/50 text-fg-dim'
         } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
         whileHover={disabled ? {} : { scale: 1.005 }}
         whileTap={disabled ? {} : { scale: 0.995 }}
       >
-        <motion.div 
+        <motion.div
           className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
-            isDragActive ? 'bg-[#5c54f2] text-white' : 'bg-[#5c54f2]/10 text-[#5c54f2]'
+            isDragActive ? 'bg-accent text-white' : 'bg-accent-soft text-accent'
           }`}
           animate={isDragActive ? { y: -4, scale: 1.05 } : { y: 0 }}
           transition={{ type: 'spring', stiffness: 300, damping: 15 }}
@@ -83,11 +83,11 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onFileSelect, disabled }) =>
         </motion.div>
 
         <div className="flex flex-col gap-1">
-          <strong className="text-white text-sm font-semibold">
-            {isDragActive ? '释放以拖入文件' : '点击选择 或 拖拽音频/视频文件到此处'}
+          <strong className="text-fg text-sm font-semibold">
+            {isDragActive ? '松手即可上传' : '点击选择文件，或把音频/视频拖到这里'}
           </strong>
-          <small className="text-[11px] text-gray-500 max-w-sm mx-auto">
-            支持 mp3 / wav / m4a / flac / aac / ogg / mp4 / mov / mkv / pcm 格式
+          <small className="text-[11.5px] text-muted max-w-md mx-auto">
+            支持 mp3 / wav / m4a / flac / aac / ogg / mp4 / mov / mkv / pcm，最长可处理 2 小时以上的录音
           </small>
         </div>
       </motion.div>
